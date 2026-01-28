@@ -1,0 +1,77 @@
+# Nextflow work directories
+work/
+.nextflow/
+.nextflow.log*
+
+# Results (can be regenerated)
+results*/
+
+# Large data files
+*.bam
+*.bam.bai
+*.cram
+*.crai
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.sam
+*.vcf
+*.vcf.gz
+*.bed
+
+# Reference databases (too large for git)
+hla_references/
+raw_bam/
+aligned_bam/
+temp_input*/
+
+# SpecHLA local - keep scripts, exclude large files
+spechla_local/db/
+spechla_local/local_tools/
+spechla_local/local_bin/
+spechla_local/cmake-*/
+spechla_local/bin/
+spechla_local/script/
+spechla_local/spechla_env/
+spechla_local/*.fasta
+spechla_local/*.fa
+spechla_local/*.bt2
+
+# Container images
+*.sif
+*.img
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Windows WSL Zone.Identifier files
+*:Zone.Identifier
+
+# Backup files
+*.bak
+*.bak.*
+
+# Old/archive directories
+modules/x_old/
+app/
+
+# Test samples (data files)
+test_samples/*.bam
+test_samples/*.fastq.gz
