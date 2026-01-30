@@ -224,7 +224,6 @@ create_directories() {
     mkdir -p hla_references/containers
     mkdir -p hla_references/databases/hlahd_db
     mkdir -p hla_references/databases/hlala_graphs
-    mkdir -p conda_envs
     mkdir -p logs
 
     info "Directory structure created at $INSTALL_DIR"
@@ -387,48 +386,22 @@ install_arcashla() {
 
     cd "$INSTALL_DIR"
 
-    # Method 1: Try Singularity container
+    # Use Singularity container (recommended for Puhti)
     if check_command singularity; then
         log "Pulling arcasHLA container..."
         singularity pull "$INSTALL_DIR/hla_references/containers/arcashla.sif" \
             docker://quay.io/biocontainers/arcas-hla:0.5.0--hdfd78af_1 2>&1 | tee -a "$LOG_FILE" || \
             warn "Could not pull arcasHLA container"
-    fi
-
-    # Method 2: Local installation via conda/pip
-    log "Setting up local arcasHLA installation..."
-
-    # Create conda environment if conda is available
-    if check_command conda; then
-        if [[ ! -d "$INSTALL_DIR/conda_envs/arcashla" ]]; then
-            log "Creating arcasHLA conda environment..."
-            conda create -y -p "$INSTALL_DIR/conda_envs/arcashla" python=3.8 2>&1 | tee -a "$LOG_FILE"
-
-            # Activate and install
-            source "$(conda info --base)/etc/profile.d/conda.sh"
-            conda activate "$INSTALL_DIR/conda_envs/arcashla"
-
-            pip install arcas-hla 2>&1 | tee -a "$LOG_FILE" || warn "pip install arcas-hla failed"
-
-            # Initialize database
-            arcasHLA reference --update 2>&1 | tee -a "$LOG_FILE" || warn "arcasHLA database update failed"
-
-            conda deactivate
-            info "arcasHLA conda environment created"
-        else
-            info "arcasHLA conda environment already exists"
-        fi
     else
-        warn "conda not available - arcasHLA local installation skipped"
+        warn "Singularity not available - cannot install arcasHLA"
     fi
 
     # Verify
     if [[ -f "$INSTALL_DIR/hla_references/containers/arcashla.sif" ]]; then
         info "arcasHLA container available"
-    elif [[ -d "$INSTALL_DIR/conda_envs/arcashla" ]]; then
-        info "arcasHLA conda environment available"
     else
-        warn "arcasHLA installation incomplete - may need manual setup"
+        warn "arcasHLA installation incomplete"
+        info "Try manually: singularity pull arcashla.sif docker://quay.io/biocontainers/arcas-hla:0.5.0--hdfd78af_1"
     fi
 }
 
