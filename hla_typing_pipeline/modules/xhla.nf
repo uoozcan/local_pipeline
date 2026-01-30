@@ -1,14 +1,18 @@
 /*
  * xHLA Module
  * HLA typing using Human Longevity Inc.'s xHLA algorithm
- * Supports BAM input only (requires aligned reads)
+ * Supports BAM input (BAM recommended, FASTQ has limited support)
  * Uses k-mer based approach for HLA typing
+ *
+ * Note: xHLA was designed for hg19. For hg38 BAMs, we extract reads
+ * from the hg38 HLA region and run xHLA's alignment/typing steps manually.
  */
 
 process XHLA {
     tag "$sample_id"
     label 'process_medium'
     publishDir "${params.outdir}/${sample_id}/xhla", mode: 'copy'
+    errorStrategy 'ignore'
 
     container "${params.container_dir}/xhla.sif"
 
@@ -34,23 +38,86 @@ process XHLA {
     # Determine chromosome naming convention (chr6 vs 6)
     CHR_PREFIX=\$(samtools view -H ${bam} | grep -m1 "^@SQ" | grep -o "SN:[^	]*" | cut -d: -f2 | grep -o "^chr" || echo "")
 
-    # xHLA expects chr6 coordinates, may need to adjust for non-chr BAMs
-    echo "Chromosome prefix detected: '\${CHR_PREFIX}'"
+    # Detect reference genome version (hg19 vs hg38) based on chromosome 6 length
+    CHR6_LEN=\$(samtools view -H ${bam} | grep "^@SQ.*SN:\${CHR_PREFIX}6" | grep -o "LN:[0-9]*" | cut -d: -f2)
 
-    # Run xHLA
-    echo "[Running xHLA...]"
-    python /opt/bin/run.py \
-        --sample_id ${sample_id} \
-        --input_bam_path ${bam} \
-        --output_path ${sample_id}/ \
-        --full
+    if [ "\${CHR6_LEN}" -gt "171000000" ]; then
+        REF_VERSION="hg38"
+        # hg38 HLA region
+        HLA_REGION="\${CHR_PREFIX}6:28510120-33480577"
+    else
+        REF_VERSION="hg19"
+        # hg19 HLA region (xHLA default)
+        HLA_REGION="\${CHR_PREFIX}6:29886751-33090696"
+    fi
+
+    echo "Detected reference: \${REF_VERSION}, HLA region: \${HLA_REGION}"
+
+    # Try running xHLA directly first (works best with hg19 + chr prefix)
+    XHLA_SUCCESS=false
+    if [ "\${REF_VERSION}" == "hg19" ] && [ "\${CHR_PREFIX}" == "chr" ]; then
+        echo "[Running xHLA directly...]"
+        python /opt/bin/run.py \
+            --sample_id ${sample_id} \
+            --input_bam_path ${bam} \
+            --output_path ${sample_id}/ 2>&1 || true
+
+        if [ -f "${sample_id}/report-${sample_id}-hla.json" ]; then
+            XHLA_SUCCESS=true
+        fi
+    fi
+
+    # If direct run failed, try manual extraction with correct coordinates
+    if [ "\${XHLA_SUCCESS}" != "true" ]; then
+        echo "[Running xHLA with manual extraction for \${REF_VERSION}...]"
+
+        # Extract reads from HLA region
+        samtools view ${bam} \${HLA_REGION} > ${sample_id}/temp.sam 2>/dev/null || true
+
+        if [ -s "${sample_id}/temp.sam" ]; then
+            # Convert to FASTQ using xHLA's preprocessor
+            /opt/bin/preprocess.pl ${sample_id}/temp.sam | gzip > ${sample_id}/${sample_id}.fq.gz
+            rm -f ${sample_id}/temp.sam
+
+            # Run alignment
+            /opt/bin/align.pl ${sample_id}/${sample_id}.fq.gz ${sample_id}/${sample_id}.tsv 2>&1 || true
+
+            # Run typing (may fail with some datasets)
+            if [ -f "${sample_id}/${sample_id}.tsv" ]; then
+                /opt/bin/typing.r ${sample_id}/${sample_id}.tsv ${sample_id}/${sample_id}.hla 2>&1 || true
+
+                # Generate report if typing succeeded
+                if [ -f "${sample_id}/${sample_id}.hla" ]; then
+                    /opt/bin/report.py \
+                        -in ${sample_id}/${sample_id}.hla \
+                        -out ${sample_id}/report-${sample_id}-hla.json \
+                        -subject ${sample_id} \
+                        -sample ${sample_id} 2>&1 || true
+                    XHLA_SUCCESS=true
+                fi
+            fi
+        fi
+    fi
 
     # Parse results to standard format
     echo "[Parsing xHLA results...]"
-    parse_xhla_results.py \
-        --sample ${sample_id} \
-        --input ${sample_id}/report-${sample_id}-hla.json \
-        --output ${sample_id}_xhla.txt
+    if [ -f "${sample_id}/report-${sample_id}-hla.json" ]; then
+        parse_xhla_results.py \
+            --sample ${sample_id} \
+            --input ${sample_id}/report-${sample_id}-hla.json \
+            --output ${sample_id}_xhla.txt
+    else
+        # Create empty results file if xHLA failed
+        echo "# xHLA results for ${sample_id}" > ${sample_id}_xhla.txt
+        echo "# xHLA typing failed - insufficient data or incompatible reference" >> ${sample_id}_xhla.txt
+        echo "Gene\tAllele1\tAllele2\tReads1\tReads2" >> ${sample_id}_xhla.txt
+        echo "A\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "B\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "C\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DRB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DQB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DPB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+    fi
 
     # Version info
     cat <<-END_VERSIONS > versions.yml
@@ -63,12 +130,14 @@ process XHLA {
 
 /*
  * xHLA from FASTQ files
- * Note: xHLA requires BAM input, so we need to align FASTQ first
+ * Note: xHLA requires BAM/aligned reads. For FASTQ, we align to HLA reference first.
+ * This is less reliable than BAM input.
  */
 process XHLA_FASTQ {
     tag "$sample_id"
     label 'process_medium'
     publishDir "${params.outdir}/${sample_id}/xhla", mode: 'copy'
+    errorStrategy 'ignore'
 
     container "${params.container_dir}/xhla.sif"
 
@@ -85,52 +154,39 @@ process XHLA_FASTQ {
     # Create output directory
     mkdir -p ${sample_id}
 
-    # xHLA requires aligned BAM, so we need to align to HLA reference first
-    echo "[Aligning FASTQ to HLA reference...]"
+    # xHLA works best with aligned BAM files
+    # For FASTQ input, we'll process reads directly through xHLA's alignment
 
-    # Use the xHLA internal reference for alignment
-    # Extract reference from container data
-    HLA_REF="/opt/data/chr6/hla-chr6.fa"
+    echo "[Processing FASTQ for xHLA...]"
 
-    # Check if bwa index exists, if not use alternative alignment
-    if [ -f "\${HLA_REF}.bwt" ]; then
-        # Align with BWA
-        bwa mem -t ${task.cpus} \${HLA_REF} ${fastq1} ${fastq2} | \
-            samtools sort -@ ${task.cpus} -o ${sample_id}/aligned.bam -
-        samtools index ${sample_id}/aligned.bam
+    # Combine and prepare FASTQ files
+    if [[ "${fastq1}" == *.gz ]]; then
+        zcat ${fastq1} ${fastq2} | gzip > ${sample_id}/${sample_id}.fq.gz
     else
-        # Use diamond for protein-level alignment (xHLA's internal method)
-        # Create a minimal BAM from FASTQ for xHLA processing
-        echo "Creating pseudo-aligned BAM for xHLA..."
-
-        # Combine FASTQs and create unaligned BAM
-        samtools import -@ ${task.cpus} \
-            -1 ${fastq1} -2 ${fastq2} \
-            -o ${sample_id}/unaligned.bam
-
-        # For xHLA, we need chromosome 6 aligned reads
-        # Use minimap2 if available, otherwise skip alignment
-        if command -v minimap2 &> /dev/null; then
-            minimap2 -ax sr -t ${task.cpus} \${HLA_REF} ${fastq1} ${fastq2} | \
-                samtools sort -@ ${task.cpus} -o ${sample_id}/aligned.bam -
-            samtools index ${sample_id}/aligned.bam
-        else
-            echo "WARNING: Cannot align FASTQ for xHLA without proper index"
-            echo "# xHLA results for ${sample_id}" > ${sample_id}_xhla.txt
-            echo "# ERROR: FASTQ input not supported without alignment" >> ${sample_id}_xhla.txt
-            echo "Gene\tAllele1\tAllele2" >> ${sample_id}_xhla.txt
-            exit 0
-        fi
+        cat ${fastq1} ${fastq2} | gzip > ${sample_id}/${sample_id}.fq.gz
     fi
 
-    # Run xHLA on aligned BAM
-    echo "[Running xHLA...]"
-    python /opt/bin/run.py \
-        --sample_id ${sample_id} \
-        --input_bam_path ${sample_id}/aligned.bam \
-        --output_path ${sample_id}/ \
-        --full \
-        --delete
+    # Run alignment
+    echo "[Running xHLA alignment...]"
+    /opt/bin/align.pl ${sample_id}/${sample_id}.fq.gz ${sample_id}/${sample_id}.tsv 2>&1 || true
+
+    XHLA_SUCCESS=false
+
+    # Run typing if alignment produced output
+    if [ -f "${sample_id}/${sample_id}.tsv" ] && [ -s "${sample_id}/${sample_id}.tsv" ]; then
+        echo "[Running xHLA typing...]"
+        /opt/bin/typing.r ${sample_id}/${sample_id}.tsv ${sample_id}/${sample_id}.hla 2>&1 || true
+
+        # Generate report if typing succeeded
+        if [ -f "${sample_id}/${sample_id}.hla" ]; then
+            /opt/bin/report.py \
+                -in ${sample_id}/${sample_id}.hla \
+                -out ${sample_id}/report-${sample_id}-hla.json \
+                -subject ${sample_id} \
+                -sample ${sample_id} 2>&1 || true
+            XHLA_SUCCESS=true
+        fi
+    fi
 
     # Parse results to standard format
     echo "[Parsing xHLA results...]"
@@ -140,19 +196,25 @@ process XHLA_FASTQ {
             --input ${sample_id}/report-${sample_id}-hla.json \
             --output ${sample_id}_xhla.txt
     else
+        # Create empty results file if xHLA failed
         echo "# xHLA results for ${sample_id}" > ${sample_id}_xhla.txt
-        echo "# No results generated" >> ${sample_id}_xhla.txt
-        echo "Gene\tAllele1\tAllele2" >> ${sample_id}_xhla.txt
+        echo "# xHLA typing failed - FASTQ input has limited support" >> ${sample_id}_xhla.txt
+        echo "Gene\tAllele1\tAllele2\tReads1\tReads2" >> ${sample_id}_xhla.txt
+        echo "A\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "B\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "C\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DRB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DQB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DPB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
     fi
 
-    # Cleanup alignment files
-    rm -f ${sample_id}/aligned.bam* ${sample_id}/unaligned.bam
+    # Cleanup large intermediate files
+    rm -f ${sample_id}/${sample_id}.fq.gz
 
     # Version info
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         xhla: "1.0"
-        samtools: \$(samtools --version | head -1 | cut -d' ' -f2)
     END_VERSIONS
     """
 }
