@@ -2,7 +2,7 @@
 #=============================================================================
 # HLA Typing Pipeline - Quick Setup Script for CSC Puhti
 #=============================================================================
-# Minimal setup focusing on SpecHLA (local installation)
+# Minimal setup using SpecHLA container (recommended)
 #
 # Usage:
 #   ./puhti_quick_setup.sh [PROJECT_ID]
@@ -50,17 +50,16 @@ log "Setting up HLA typing pipeline in: $INSTALL_DIR"
 log "Loading modules..."
 module purge 2>/dev/null || true
 module load gcc/11.3.0 2>/dev/null || module load gcc
-module load cmake 2>/dev/null || true
 module load samtools 2>/dev/null || true
 module load bwa 2>/dev/null || true
 module load nextflow 2>/dev/null || true
-module load python-data 2>/dev/null || true
+module load singularity 2>/dev/null || true
 
 # Create directories
 log "Creating directories..."
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
-mkdir -p hla_typing_pipeline spechla_local hla_references/containers logs results
+mkdir -p hla_typing_pipeline hla_references/containers logs results
 
 # Clone pipeline
 log "Cloning pipeline repository..."
@@ -71,34 +70,19 @@ else
     git clone https://github.com/uoozcan/local_pipeline.git hla_typing_pipeline
 fi
 
-# Clone and build SpecHLA
-log "Installing SpecHLA..."
-if [[ -d "spechla_local/.git" ]]; then
-    cd spechla_local && git pull && cd ..
+# Pull SpecHLA container
+log "Setting up SpecHLA container..."
+if [[ -f "hla_references/containers/spechla_1.0.7-3.sif" ]]; then
+    log "SpecHLA container already exists"
 else
-    rm -rf spechla_local
-    git clone https://github.com/deepomicslab/SpecHLA.git spechla_local
-fi
-
-cd spechla_local
-
-# Build SpecHap
-if [[ -d "bin/SpecHap" ]]; then
-    log "Building SpecHap..."
-    cd bin/SpecHap
-    rm -rf build && mkdir -p build && cd build
-    cmake .. && make -j 4
-    cd ../../..
-fi
-
-# Download database
-log "Downloading SpecHLA database (this takes time)..."
-if [[ ! -d "db" ]] || [[ ! -f "db/ref/hla.ref.extend.fa" ]]; then
-    if [[ -f "script/download_db.sh" ]]; then
-        bash script/download_db.sh || warn "Database download may be incomplete"
-    fi
-else
-    log "Database already exists"
+    log "Attempting to pull SpecHLA container..."
+    singularity pull "hla_references/containers/spechla_1.0.7-3.sif" \
+        docker://quay.io/biocontainers/spechla:1.0.7--hdfd78af_3 2>/dev/null || \
+    singularity pull "hla_references/containers/spechla_1.0.7-3.sif" \
+        docker://deepomicslab/spechla:latest 2>/dev/null || {
+        warn "Could not pull SpecHLA container automatically"
+        warn "Please copy the container manually to: $INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif"
+    }
 fi
 
 cd "$INSTALL_DIR"
@@ -108,10 +92,12 @@ log "Creating configuration..."
 cat > hla_typing_pipeline/conf/user.config << EOF
 /*
  * User configuration for Puhti - Generated $(date)
+ * Uses container-based SpecHLA (recommended)
  */
 params {
-    spechla_path      = "${INSTALL_DIR}/spechla_local"
-    use_local_spechla = true
+    // SpecHLA via container
+    use_local_spechla = false
+    spechla_path      = "/opt/SpecHLA"  // Path inside container
     container_dir     = "${INSTALL_DIR}/hla_references/containers"
     outdir            = "${INSTALL_DIR}/results"
 }
@@ -132,10 +118,10 @@ EOF
 cat > load_env.sh << EOF
 #!/bin/bash
 module purge
-module load gcc/11.3.0 samtools bwa nextflow python-data
+module load gcc/11.3.0 samtools bwa nextflow singularity
 export HLA_DIR="${INSTALL_DIR}"
-export SPECHLA_PATH="${INSTALL_DIR}/spechla_local"
-alias run_hla="nextflow run \${HLA_DIR}/hla_typing_pipeline/main.nf -c \${HLA_DIR}/hla_typing_pipeline/conf/user.config"
+export HLA_CONTAINERS="${INSTALL_DIR}/hla_references/containers"
+alias run_hla="nextflow run \${HLA_DIR}/hla_typing_pipeline/main.nf -c \${HLA_DIR}/hla_typing_pipeline/conf/user.config -profile singularity"
 echo "Environment loaded. Use 'run_hla --help' for options."
 EOF
 chmod +x load_env.sh
@@ -167,6 +153,7 @@ nextflow run ${HLA_DIR}/hla_typing_pipeline/main.nf \
     --input_bam "$INPUT_BAM" \
     --outdir "$OUTDIR" \
     --tools spechla \
+    -profile singularity \
     -resume
 RUNSCRIPT
 chmod +x run_sample.sh
@@ -181,10 +168,11 @@ echo "Setup Complete!"
 echo "=============================================="
 
 # Check installation
-if [[ -f "$INSTALL_DIR/spechla_local/script/whole/SpecHLA.sh" ]]; then
-    echo -e "${GREEN}[OK]${NC} SpecHLA installed"
+if [[ -f "$INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif" ]]; then
+    echo -e "${GREEN}[OK]${NC} SpecHLA container available"
 else
-    echo -e "${RED}[FAIL]${NC} SpecHLA installation incomplete"
+    echo -e "${RED}[FAIL]${NC} SpecHLA container not found"
+    echo "       Please copy container to: $INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif"
 fi
 
 if [[ -f "$INSTALL_DIR/hla_typing_pipeline/main.nf" ]]; then

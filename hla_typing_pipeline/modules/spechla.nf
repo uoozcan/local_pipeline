@@ -2,7 +2,8 @@
  * SpecHLA Module
  * High-resolution HLA typing from WGS/WES/RNA-seq data
  * Supports both BAM and FASTQ inputs
- * Uses local installation (default) or Singularity container
+ * Uses Singularity container (default) - spechla_1.0.7-3.sif
+ * Container includes all dependencies (SpecHap, databases, etc.)
  */
 
 process SPECHLA {

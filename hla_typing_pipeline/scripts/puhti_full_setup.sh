@@ -220,7 +220,6 @@ create_directories() {
 
     # Create subdirectories
     mkdir -p hla_typing_pipeline
-    mkdir -p spechla_local
     mkdir -p hla_references/containers
     mkdir -p hla_references/databases/hlahd_db
     mkdir -p hla_references/databases/hlala_graphs
@@ -250,7 +249,7 @@ clone_pipeline() {
 }
 
 #-----------------------------------------------------------------------------
-# Install SpecHLA
+# Install SpecHLA (Container-based)
 #-----------------------------------------------------------------------------
 install_spechla() {
     if [[ "$SKIP_SPECHLA" == true ]]; then
@@ -258,87 +257,59 @@ install_spechla() {
         return
     fi
 
-    log "Installing SpecHLA..."
+    log "Setting up SpecHLA (container-based)..."
 
     cd "$INSTALL_DIR"
 
-    # Clone SpecHLA
-    if [[ -d "spechla_local/.git" ]]; then
-        info "SpecHLA already exists, pulling latest..."
-        cd spechla_local
-        git pull origin master || warn "Could not pull latest SpecHLA"
-        cd "$INSTALL_DIR"
+    # SpecHLA via Singularity container (recommended for Puhti)
+    # This avoids complex local builds of SpecHap with ARPACK dependencies
+    if check_command singularity; then
+        log "Pulling SpecHLA container..."
+
+        # First try the pre-built container from a registry
+        singularity pull "$INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif" \
+            docker://quay.io/biocontainers/spechla:1.0.7--hdfd78af_3 2>&1 | tee -a "$LOG_FILE" || {
+
+            warn "Could not pull SpecHLA container from biocontainers"
+            info "Trying alternative source..."
+
+            # Try alternative sources or provide manual instructions
+            singularity pull "$INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif" \
+                docker://deepomicslab/spechla:latest 2>&1 | tee -a "$LOG_FILE" || {
+
+                warn "Could not pull SpecHLA container from dockerhub"
+                info ""
+                info "SpecHLA container needs to be copied manually."
+                info "If you have the container file locally, copy it to:"
+                info "  $INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif"
+                info ""
+                info "Alternative: Build container from definition file:"
+                info "  singularity build spechla_1.0.7-3.sif spechla.def"
+            }
+        }
     else
-        rm -rf spechla_local
-        log "Cloning SpecHLA from GitHub..."
-        if ! git clone https://github.com/deepomicslab/SpecHLA.git spechla_local 2>&1 | tee -a "$LOG_FILE"; then
-            error "Failed to clone SpecHLA repository. Check your internet connection."
-        fi
+        warn "Singularity not available - cannot install SpecHLA container"
+        info "Load singularity module and re-run setup"
     fi
 
-    # Verify clone was successful
-    if [[ ! -d "$INSTALL_DIR/spechla_local/script" ]]; then
-        error "SpecHLA clone failed - directory is empty or incomplete"
-    fi
+    # Verify container
+    if [[ -f "$INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif" ]]; then
+        info "SpecHLA container available"
 
-    cd "$INSTALL_DIR/spechla_local"
-    log "SpecHLA cloned to: $(pwd)"
-
-    # Build SpecHap
-    log "Building SpecHap..."
-    if [[ -d "bin/SpecHap" ]]; then
-        cd bin/SpecHap
-        rm -rf build
-        mkdir -p build
-        cd build
-        log "Running cmake..."
-        if ! cmake .. 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE"; then
-            warn "cmake failed - SpecHap may not work"
-        else
-            log "Running make..."
-            if ! make -j 4 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE"; then
-                warn "make failed - SpecHap may not work"
-            else
-                info "SpecHap built successfully"
-            fi
-        fi
-        cd "$INSTALL_DIR/spechla_local"
+        # Test container
+        log "Testing SpecHLA container..."
+        singularity exec "$INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif" \
+            ls /opt/SpecHLA/script/whole/SpecHLA.sh 2>/dev/null && \
+            info "SpecHLA container verified - SpecHLA.sh found" || \
+            warn "SpecHLA container may have issues - SpecHLA.sh not found at expected path"
     else
-        warn "SpecHap directory not found at bin/SpecHap - may need manual build"
+        warn "SpecHLA container not found"
+        info "The pipeline will not be able to run SpecHLA without the container."
+        info ""
+        info "To obtain the container, either:"
+        info "  1. Copy from local machine: scp spechla_1.0.7-3.sif user@puhti.csc.fi:$INSTALL_DIR/hla_references/containers/"
+        info "  2. Build from definition file (requires fakeroot): singularity build --fakeroot spechla_1.0.7-3.sif spechla.def"
     fi
-
-    # Build other dependencies if present
-    if [[ -d "bin/fermikit" ]]; then
-        log "Building fermikit..."
-        cd bin/fermikit
-        make -j 4 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE" || warn "fermikit build had issues"
-        cd "$INSTALL_DIR/spechla_local"
-    fi
-
-    # Download SpecHLA database
-    log "Downloading SpecHLA database (this may take a while)..."
-    if [[ -f "script/download_db.sh" ]]; then
-        # Check if database already exists
-        if [[ -d "db" ]] && [[ -f "db/ref/hla.ref.extend.fa" ]]; then
-            info "SpecHLA database already exists"
-        else
-            log "Running download_db.sh..."
-            bash script/download_db.sh 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE" || warn "Database download had issues"
-        fi
-    else
-        warn "download_db.sh not found - you may need to download database manually"
-    fi
-
-    # Verify installation
-    if [[ -f "script/whole/SpecHLA.sh" ]]; then
-        info "SpecHLA installed successfully at $INSTALL_DIR/spechla_local"
-    else
-        warn "SpecHLA installation incomplete - SpecHLA.sh not found"
-    fi
-
-    # List what was installed
-    log "SpecHLA directory contents:"
-    ls -la "$INSTALL_DIR/spechla_local/" 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE"
 
     cd "$INSTALL_DIR"
 }
@@ -570,29 +541,25 @@ install_python_deps() {
 
     cd "$INSTALL_DIR"
 
-    # Create requirements file including SpecHLA dependencies
+    # Create requirements file for pipeline visualization only
+    # Note: SpecHLA dependencies are inside the container
     cat > requirements.txt << 'EOF'
-# SpecHLA dependencies
-biopython>=1.79
-pysam>=0.19.0
-numpy>=1.21.0
-scipy>=1.7.0
-
 # Pipeline visualization dependencies
 matplotlib>=3.5.0
 pandas>=1.3.0
 seaborn>=0.11.0
 jinja2>=3.0.0
+numpy>=1.21.0
 EOF
 
     # Install with pip
     pip install --user -r requirements.txt 2>&1 | tee -a "$LOG_FILE" || \
         warn "Some Python packages may not have installed correctly"
 
-    # Verify critical packages
-    python3 -c "import pysam; import Bio; import numpy; import scipy" 2>/dev/null && \
-        info "SpecHLA Python dependencies verified" || \
-        warn "Some SpecHLA Python dependencies may be missing"
+    # Verify visualization packages
+    python3 -c "import matplotlib; import pandas; import numpy" 2>/dev/null && \
+        info "Python visualization dependencies verified" || \
+        warn "Some Python visualization dependencies may be missing"
 
     info "Python dependencies installed"
 }
@@ -613,9 +580,9 @@ configure_pipeline() {
  */
 
 params {
-    // Local tool installations
-    spechla_path      = "${INSTALL_DIR}/spechla_local"
-    use_local_spechla = true
+    // SpecHLA settings - use container (recommended for Puhti)
+    use_local_spechla = false
+    spechla_path      = "/opt/SpecHLA"  // Path inside container
 
     // Container paths
     container_dir     = "${INSTALL_DIR}/hla_references/containers"
@@ -673,7 +640,7 @@ module load singularity
 
 # Set paths
 export HLA_PIPELINE_DIR="${INSTALL_DIR}/hla_typing_pipeline"
-export SPECHLA_PATH="${INSTALL_DIR}/spechla_local"
+export HLA_CONTAINERS="${INSTALL_DIR}/hla_references/containers"
 export PATH="\${HLA_PIPELINE_DIR}/bin:\${PATH}"
 
 # Convenience aliases
@@ -761,35 +728,15 @@ verify_installation() {
         echo -e "${RED}[FAIL]${NC} Pipeline not found"
     fi
 
-    # Check SpecHLA
-    if [[ -f "$INSTALL_DIR/spechla_local/script/whole/SpecHLA.sh" ]]; then
-        echo -e "${GREEN}[OK]${NC} SpecHLA scripts installed"
+    # Check SpecHLA container
+    if [[ -f "$INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif" ]]; then
+        echo -e "${GREEN}[OK]${NC} SpecHLA container available"
     else
-        echo -e "${YELLOW}[WARN]${NC} SpecHLA scripts not installed"
+        echo -e "${RED}[FAIL]${NC} SpecHLA container not found"
+        echo "       Copy container to: $INSTALL_DIR/hla_references/containers/spechla_1.0.7-3.sif"
     fi
 
-    # Check SpecHap binary
-    if [[ -f "$INSTALL_DIR/spechla_local/bin/SpecHap/build/SpecHap" ]]; then
-        echo -e "${GREEN}[OK]${NC} SpecHap binary built"
-    else
-        echo -e "${YELLOW}[WARN]${NC} SpecHap binary not found - may need manual build"
-    fi
-
-    # Check SpecHLA database
-    if [[ -f "$INSTALL_DIR/spechla_local/db/ref/hla.ref.extend.fa" ]]; then
-        echo -e "${GREEN}[OK]${NC} SpecHLA database downloaded"
-    else
-        echo -e "${YELLOW}[WARN]${NC} SpecHLA database not found - run: bash spechla_local/script/download_db.sh"
-    fi
-
-    # Check Python dependencies for SpecHLA
-    if python3 -c "import pysam; import Bio; import numpy; import scipy" 2>/dev/null; then
-        echo -e "${GREEN}[OK]${NC} SpecHLA Python dependencies available"
-    else
-        echo -e "${YELLOW}[WARN]${NC} SpecHLA Python dependencies missing (pysam, biopython, numpy, scipy)"
-    fi
-
-    # Check containers
+    # Check other containers
     for tool in hlahd arcashla optitype hlala xhla; do
         if [[ -f "$INSTALL_DIR/hla_references/containers/${tool}.sif" ]]; then
             echo -e "${GREEN}[OK]${NC} ${tool} container available"
