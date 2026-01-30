@@ -31,6 +31,7 @@ SKIP_HLAHD=false
 SKIP_ARCASHLA=false
 SKIP_OPTITYPE=false
 SKIP_HLALA=false
+SKIP_XHLA=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -101,6 +102,10 @@ parse_args() {
                 SKIP_HLALA=true
                 shift
                 ;;
+            --skip-xhla)
+                SKIP_XHLA=true
+                shift
+                ;;
             --help|-h)
                 show_help
                 exit 0
@@ -127,6 +132,7 @@ Options:
     --skip-arcashla         Skip arcasHLA installation
     --skip-optitype         Skip OptiType installation
     --skip-hlala            Skip HLA*LA installation
+    --skip-xhla             Skip xHLA installation
     -h, --help              Show this help message
 
 Examples:
@@ -506,6 +512,43 @@ install_hlala() {
 }
 
 #-----------------------------------------------------------------------------
+# Install xHLA
+#-----------------------------------------------------------------------------
+install_xhla() {
+    if [[ "$SKIP_XHLA" == true ]]; then
+        info "Skipping xHLA installation"
+        return
+    fi
+
+    log "Installing xHLA..."
+
+    cd "$INSTALL_DIR"
+
+    # xHLA via Singularity container
+    if check_command singularity; then
+        log "Pulling xHLA container..."
+        singularity pull "$INSTALL_DIR/hla_references/containers/xhla.sif" \
+            docker://humanlongevity/hla:latest 2>&1 | tee -a "$LOG_FILE" || \
+            warn "Could not pull xHLA container from docker hub"
+
+        # Alternative: try biocontainers
+        if [[ ! -f "$INSTALL_DIR/hla_references/containers/xhla.sif" ]]; then
+            singularity pull "$INSTALL_DIR/hla_references/containers/xhla.sif" \
+                docker://quay.io/biocontainers/xhla:1.0--hdfd78af_0 2>&1 | tee -a "$LOG_FILE" || \
+                warn "Could not pull xHLA container"
+        fi
+    fi
+
+    # Verify
+    if [[ -f "$INSTALL_DIR/hla_references/containers/xhla.sif" ]]; then
+        info "xHLA container available"
+    else
+        warn "xHLA installation incomplete"
+        info "xHLA container may need to be copied manually if not available from docker hub"
+    fi
+}
+
+#-----------------------------------------------------------------------------
 # Install Python Dependencies
 #-----------------------------------------------------------------------------
 install_python_deps() {
@@ -701,7 +744,7 @@ verify_installation() {
     fi
 
     # Check containers
-    for tool in hlahd arcashla optitype hlala; do
+    for tool in hlahd arcashla optitype hlala xhla; do
         if [[ -f "$INSTALL_DIR/hla_references/containers/${tool}.sif" ]]; then
             echo -e "${GREEN}[OK]${NC} ${tool} container available"
         else
@@ -762,6 +805,7 @@ main() {
     install_arcashla
     install_optitype
     install_hlala
+    install_xhla
     install_python_deps
     configure_pipeline
     create_convenience_scripts

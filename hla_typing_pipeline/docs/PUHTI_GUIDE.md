@@ -219,7 +219,7 @@ sbatch hla_typing_pipeline/scripts/submit_hla_batch.sh
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--tools` | `spechla,hlahd` | HLA typing tools to use |
+| `--tools` | `spechla,hlahd` | HLA typing tools: spechla,hlahd,hlala,arcashla,optitype,xhla |
 | `--reference` | `hg38` | Reference genome version |
 | `--resolution` | `2-field` | Output resolution |
 | `--seq_type` | `dna` | Sequence type (for OptiType) |
