@@ -525,14 +525,20 @@ install_xhla() {
 # Install Python Dependencies
 #-----------------------------------------------------------------------------
 install_python_deps() {
-    log "Installing Python dependencies for visualization..."
+    log "Installing Python dependencies..."
 
     cd "$INSTALL_DIR"
 
-    # Create requirements file
+    # Create requirements file including SpecHLA dependencies
     cat > requirements.txt << 'EOF'
-matplotlib>=3.5.0
+# SpecHLA dependencies
+biopython>=1.79
+pysam>=0.19.0
 numpy>=1.21.0
+scipy>=1.7.0
+
+# Pipeline visualization dependencies
+matplotlib>=3.5.0
 pandas>=1.3.0
 seaborn>=0.11.0
 jinja2>=3.0.0
@@ -541,6 +547,11 @@ EOF
     # Install with pip
     pip install --user -r requirements.txt 2>&1 | tee -a "$LOG_FILE" || \
         warn "Some Python packages may not have installed correctly"
+
+    # Verify critical packages
+    python3 -c "import pysam; import Bio; import numpy; import scipy" 2>/dev/null && \
+        info "SpecHLA Python dependencies verified" || \
+        warn "Some SpecHLA Python dependencies may be missing"
 
     info "Python dependencies installed"
 }
@@ -711,9 +722,30 @@ verify_installation() {
 
     # Check SpecHLA
     if [[ -f "$INSTALL_DIR/spechla_local/script/whole/SpecHLA.sh" ]]; then
-        echo -e "${GREEN}[OK]${NC} SpecHLA installed"
+        echo -e "${GREEN}[OK]${NC} SpecHLA scripts installed"
     else
-        echo -e "${YELLOW}[WARN]${NC} SpecHLA not installed or incomplete"
+        echo -e "${YELLOW}[WARN]${NC} SpecHLA scripts not installed"
+    fi
+
+    # Check SpecHap binary
+    if [[ -f "$INSTALL_DIR/spechla_local/bin/SpecHap/build/SpecHap" ]]; then
+        echo -e "${GREEN}[OK]${NC} SpecHap binary built"
+    else
+        echo -e "${YELLOW}[WARN]${NC} SpecHap binary not found - may need manual build"
+    fi
+
+    # Check SpecHLA database
+    if [[ -f "$INSTALL_DIR/spechla_local/db/ref/hla.ref.extend.fa" ]]; then
+        echo -e "${GREEN}[OK]${NC} SpecHLA database downloaded"
+    else
+        echo -e "${YELLOW}[WARN]${NC} SpecHLA database not found - run: bash spechla_local/script/download_db.sh"
+    fi
+
+    # Check Python dependencies for SpecHLA
+    if python3 -c "import pysam; import Bio; import numpy; import scipy" 2>/dev/null; then
+        echo -e "${GREEN}[OK]${NC} SpecHLA Python dependencies available"
+    else
+        echo -e "${YELLOW}[WARN]${NC} SpecHLA Python dependencies missing (pysam, biopython, numpy, scipy)"
     fi
 
     # Check containers
