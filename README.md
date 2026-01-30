@@ -134,6 +134,58 @@ HLA-DRB1  DRB1*15:01   DRB1*04:01   0.92
 
 ---
 
+## BAM Input: How Multiple Tools Work
+
+When you provide a **BAM file** and run multiple tools simultaneously, each tool handles the BAM→FASTQ conversion using its own **specialized preprocessing**:
+
+```bash
+# Example: Run 3 tools from single BAM file
+nextflow run main.nf \
+    --input_bam sample.bam \
+    --tools optitype,arcashla,spechla \
+    -profile singularity
+```
+
+### Tool-Specific Preprocessing
+
+| Tool | Preprocessing Method | Why It's Specialized |
+|------|---------------------|---------------------|
+| **SpecHLA** | Extracts HLA region (chr6:28-33Mb) → FASTQ | Uses precise genomic coordinates for hg38/hg19 |
+| **arcasHLA** | `arcasHLA extract` → FASTQ | Extracts HLA-mapped reads using its own reference index |
+| **OptiType** | `samtools sort -n` → `samtools fastq` | Standard BAM to FASTQ conversion |
+| **HLA-HD** | Extracts chromosome 6 reads → FASTQ | Focuses on MHC region reads |
+| **HLA\*LA** | Works directly with BAM | Graph-based alignment, no conversion needed |
+| **xHLA** | Extracts HLA region → internal processing | K-mer based, handles BAM natively |
+
+### Why Separate Preprocessing?
+
+Each tool has **different requirements**:
+
+- **SpecHLA** needs reads from specific HLA coordinates
+- **arcasHLA** uses its own HLA reference for optimal read extraction
+- **OptiType** works with all reads (filters internally)
+
+A generic shared preprocessing would **not work** because:
+1. Tools need different subsets of reads
+2. Tools have optimized extraction methods
+3. Some tools (HLA*LA) work directly with BAM
+
+### Parallel Execution
+
+All tools run **in parallel** on the same BAM file:
+
+```
+                    ┌─── SpecHLA (own HLA extraction) ───┐
+                    │                                     │
+BAM Input ──────────┼─── arcasHLA (arcasHLA extract) ────┼──── Consensus
+                    │                                     │
+                    └─── OptiType (samtools fastq) ──────┘
+```
+
+This design ensures each tool gets exactly the reads it needs for optimal performance.
+
+---
+
 ## Installation
 
 ### Prerequisites

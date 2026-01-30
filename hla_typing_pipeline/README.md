@@ -368,6 +368,37 @@ HLA-DPB1 DPB1*04:01 DPB1*02:01 0.78         420       390
 | **Quick analysis** | `arcashla,optitype` |
 | **High accuracy** | `spechla,hlahd,hlala,arcashla` |
 
+### BAM Input: Multi-Tool Processing
+
+When running multiple tools from a single BAM file, each tool uses its own **specialized preprocessing**:
+
+```bash
+# Run multiple tools from BAM
+nextflow run main.nf \
+    --input_bam sample.bam \
+    --tools optitype,arcashla,spechla \
+    -profile singularity
+```
+
+**How each tool handles BAM input:**
+
+| Tool | Preprocessing | Description |
+|------|--------------|-------------|
+| **SpecHLA** | HLA region extraction → FASTQ | Extracts chr6:28510120-33480577 (hg38) or chr6:28477797-33448354 (hg19), converts to paired FASTQ |
+| **arcasHLA** | `arcasHLA extract` | Uses its own HLA reference index to extract relevant reads |
+| **OptiType** | `samtools sort -n` + `samtools fastq` | Standard name-sorted BAM to paired FASTQ conversion |
+| **HLA-HD** | Chromosome 6 extraction → FASTQ | Extracts MHC region reads |
+| **HLA\*LA** | Direct BAM processing | Works directly with BAM, no conversion needed |
+| **xHLA** | HLA region extraction | Extracts HLA region, processes internally |
+
+**Why specialized preprocessing?**
+- Each tool is optimized for specific read subsets
+- Generic conversion would include unnecessary reads
+- Tools like arcasHLA have custom reference indices
+- HLA*LA uses graph-based alignment directly on BAM
+
+All tools run **in parallel**, maximizing efficiency while ensuring each tool gets optimal input.
+
 ---
 
 ## Parameters
