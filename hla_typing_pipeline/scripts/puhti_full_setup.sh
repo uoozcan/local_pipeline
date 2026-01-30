@@ -267,13 +267,22 @@ install_spechla() {
         info "SpecHLA already exists, pulling latest..."
         cd spechla_local
         git pull origin master || warn "Could not pull latest SpecHLA"
-        cd ..
+        cd "$INSTALL_DIR"
     else
         rm -rf spechla_local
-        git clone https://github.com/deepomicslab/SpecHLA.git spechla_local
+        log "Cloning SpecHLA from GitHub..."
+        if ! git clone https://github.com/deepomicslab/SpecHLA.git spechla_local 2>&1 | tee -a "$LOG_FILE"; then
+            error "Failed to clone SpecHLA repository. Check your internet connection."
+        fi
     fi
 
-    cd spechla_local
+    # Verify clone was successful
+    if [[ ! -d "$INSTALL_DIR/spechla_local/script" ]]; then
+        error "SpecHLA clone failed - directory is empty or incomplete"
+    fi
+
+    cd "$INSTALL_DIR/spechla_local"
+    log "SpecHLA cloned to: $(pwd)"
 
     # Build SpecHap
     log "Building SpecHap..."
@@ -282,12 +291,20 @@ install_spechla() {
         rm -rf build
         mkdir -p build
         cd build
-        cmake .. 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE"
-        make -j 4 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE"
-        cd ../../..
-        info "SpecHap built successfully"
+        log "Running cmake..."
+        if ! cmake .. 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE"; then
+            warn "cmake failed - SpecHap may not work"
+        else
+            log "Running make..."
+            if ! make -j 4 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE"; then
+                warn "make failed - SpecHap may not work"
+            else
+                info "SpecHap built successfully"
+            fi
+        fi
+        cd "$INSTALL_DIR/spechla_local"
     else
-        warn "SpecHap directory not found - may need manual build"
+        warn "SpecHap directory not found at bin/SpecHap - may need manual build"
     fi
 
     # Build other dependencies if present
@@ -295,7 +312,7 @@ install_spechla() {
         log "Building fermikit..."
         cd bin/fermikit
         make -j 4 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE" || warn "fermikit build had issues"
-        cd ../..
+        cd "$INSTALL_DIR/spechla_local"
     fi
 
     # Download SpecHLA database
@@ -305,6 +322,7 @@ install_spechla() {
         if [[ -d "db" ]] && [[ -f "db/ref/hla.ref.extend.fa" ]]; then
             info "SpecHLA database already exists"
         else
+            log "Running download_db.sh..."
             bash script/download_db.sh 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE" || warn "Database download had issues"
         fi
     else
@@ -315,8 +333,12 @@ install_spechla() {
     if [[ -f "script/whole/SpecHLA.sh" ]]; then
         info "SpecHLA installed successfully at $INSTALL_DIR/spechla_local"
     else
-        error "SpecHLA installation failed - SpecHLA.sh not found"
+        warn "SpecHLA installation incomplete - SpecHLA.sh not found"
     fi
+
+    # List what was installed
+    log "SpecHLA directory contents:"
+    ls -la "$INSTALL_DIR/spechla_local/" 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE"
 
     cd "$INSTALL_DIR"
 }
