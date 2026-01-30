@@ -10,13 +10,22 @@ echo "=============================================="
 echo "HLA Typing Pipeline - Puhti Setup"
 echo "=============================================="
 
-# Detect project ID from current path or use default
+# Detect project ID from current path or environment
 if [[ "$PWD" =~ /scratch/(project_[0-9]+)/ ]]; then
     PROJECT_ID="${BASH_REMATCH[1]}"
 elif [[ "$PWD" =~ /projappl/(project_[0-9]+)/ ]]; then
     PROJECT_ID="${BASH_REMATCH[1]}"
+elif [[ -n "${CSC_PROJECT:-}" ]]; then
+    PROJECT_ID="$CSC_PROJECT"
 else
-    PROJECT_ID="${CSC_PROJECT:-project_2008084}"
+    echo "ERROR: Could not detect CSC project ID."
+    echo ""
+    echo "Please either:"
+    echo "  1. Run this script from /scratch/project_XXXXXXX/ directory"
+    echo "  2. Set CSC_PROJECT environment variable:"
+    echo "     export CSC_PROJECT=project_XXXXXXX"
+    echo "     ./puhti_setup.sh"
+    exit 1
 fi
 
 echo "Detected project: $PROJECT_ID"

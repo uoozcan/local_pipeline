@@ -19,11 +19,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Auto-detect project ID
+# Auto-detect project ID from path or environment
 if [[ "$PWD" =~ /scratch/(project_[0-9]+)/ ]]; then
     PROJECT_ID="${BASH_REMATCH[1]}"
+elif [[ -n "${CSC_PROJECT:-}" ]]; then
+    PROJECT_ID="$CSC_PROJECT"
 else
-    PROJECT_ID="${CSC_PROJECT:-project_2008084}"
+    echo "ERROR: Could not detect CSC project ID."
+    echo "Either:"
+    echo "  1. Run from /scratch/project_XXXXXXX/ directory"
+    echo "  2. Set CSC_PROJECT environment variable: export CSC_PROJECT=project_XXXXXXX"
+    exit 1
 fi
 
 BASE_DIR="/scratch/${PROJECT_ID}/${USER}/hla_analysis"

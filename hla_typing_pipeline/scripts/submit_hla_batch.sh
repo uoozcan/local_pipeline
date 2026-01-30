@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=hla_batch
-#SBATCH --account=project_2008084
 #SBATCH --partition=small
 #SBATCH --time=24:00:00
 #SBATCH --mem=180G
 #SBATCH --cpus-per-task=40
 #SBATCH --output=logs/hla_batch_%j.out
 #SBATCH --error=logs/hla_batch_%j.err
+# NOTE: Set account with: sbatch --account=YOUR_PROJECT_ID submit_hla_batch.sh
 
 #
 # HLA Typing Pipeline - Batch SLURM Submission Script
@@ -33,7 +33,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_DIR="$(dirname "$SCRIPT_DIR")"
 
-PROJECT_ID="${SLURM_JOB_ACCOUNT:-project_2008084}"
+PROJECT_ID="${SLURM_JOB_ACCOUNT:-${CSC_PROJECT:-}}"
+if [[ -z "$PROJECT_ID" ]]; then
+    echo "ERROR: No project ID found. Submit with: sbatch --account=YOUR_PROJECT_ID ..."
+    exit 1
+fi
 BASE_DIR="/scratch/${PROJECT_ID}/${USER}/hla_analysis"
 
 # Default parameters

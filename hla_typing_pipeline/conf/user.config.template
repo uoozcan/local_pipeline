@@ -1,0 +1,38 @@
+/*
+ * User Configuration Template for HLA Typing Pipeline
+ *
+ * INSTRUCTIONS:
+ * 1. Copy this file to 'user.config': cp user.config.template user.config
+ * 2. Edit the values below to match your setup
+ * 3. The pipeline will automatically use these settings
+ */
+
+params {
+    // ============================================
+    // CSC PROJECT SETTINGS (REQUIRED)
+    // ============================================
+    // Your CSC project ID (e.g., project_2001234)
+    project = 'YOUR_PROJECT_ID_HERE'
+
+    // ============================================
+    // CONTAINER PATHS (REQUIRED)
+    // ============================================
+    // Directory containing Singularity container images (.sif files)
+    // Expected containers: spechla_1.0.7-3.sif, hlahd.sif, arcashla.sif, optitype.sif
+    container_dir = '/scratch/YOUR_PROJECT_ID/containers'
+
+    // ============================================
+    // DATABASE PATHS (REQUIRED for HLA-HD and HLA*LA)
+    // ============================================
+    // HLA-HD database directory
+    hlahd_db = '/scratch/YOUR_PROJECT_ID/databases/hlahd_db'
+
+    // HLA*LA graph directory (only needed if using hlala tool)
+    hlala_graphs = '/scratch/YOUR_PROJECT_ID/databases/hlala_graphs'
+
+    // ============================================
+    // OUTPUT SETTINGS (OPTIONAL)
+    // ============================================
+    // Default output directory
+    // outdir = '/scratch/YOUR_PROJECT_ID/YOUR_USERNAME/hla_results'
+}

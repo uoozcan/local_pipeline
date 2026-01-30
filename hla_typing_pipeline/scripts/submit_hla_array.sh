@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=hla_array
-#SBATCH --account=project_2008084
 #SBATCH --partition=small
 #SBATCH --time=08:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=20
 #SBATCH --output=logs/hla_array_%A_%a.out
 #SBATCH --error=logs/hla_array_%A_%a.err
-# Array size set dynamically with --array=1-N
+# NOTE: Set account and array size with:
+#   sbatch --account=YOUR_PROJECT_ID --array=1-N submit_hla_array.sh
 
 #
 # HLA Typing Pipeline - SLURM Array Job
@@ -33,7 +33,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_DIR="$(dirname "$SCRIPT_DIR")"
 
-PROJECT_ID="${SLURM_JOB_ACCOUNT:-project_2008084}"
+PROJECT_ID="${SLURM_JOB_ACCOUNT:-${CSC_PROJECT:-}}"
+if [[ -z "$PROJECT_ID" ]]; then
+    echo "ERROR: No project ID found. Submit with: sbatch --account=YOUR_PROJECT_ID ..."
+    exit 1
+fi
 BASE_DIR="/scratch/${PROJECT_ID}/${USER}/hla_analysis"
 
 # Sample list file

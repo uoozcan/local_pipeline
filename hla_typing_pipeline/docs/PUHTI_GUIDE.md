@@ -39,15 +39,57 @@ This guide provides comprehensive instructions for running the HLA Typing Pipeli
 # Connect to Puhti
 ssh <username>@puhti.csc.fi
 
-# Navigate to your project scratch space
-cd /scratch/<project_id>/<username>
+# Navigate to your project scratch space (IMPORTANT: use your actual project ID)
+cd /scratch/<YOUR_PROJECT_ID>/<username>
 
 # Clone the repository
 git clone https://github.com/uoozcan/local_pipeline.git hla_analysis
 cd hla_analysis
 ```
 
-### Step 2: Run Setup Script
+### Step 2: Configure Your Project
+
+**Option A: Run from project directory (recommended)**
+```bash
+# The setup script auto-detects project ID from the path
+cd /scratch/project_XXXXXXX/$USER/hla_analysis
+./hla_typing_pipeline/scripts/puhti_setup.sh
+```
+
+**Option B: Set environment variable**
+```bash
+# Set your project ID
+export CSC_PROJECT=project_XXXXXXX
+
+# Run setup
+./hla_typing_pipeline/scripts/puhti_setup.sh
+```
+
+### Step 3: Configure Container and Database Paths
+
+```bash
+# Copy the configuration template
+cp hla_typing_pipeline/conf/user.config.template hla_typing_pipeline/conf/user.config
+
+# Edit with your paths
+nano hla_typing_pipeline/conf/user.config
+```
+
+**Required settings in user.config:**
+```groovy
+params {
+    // Your CSC project ID
+    project = 'project_XXXXXXX'
+
+    // Path to Singularity containers
+    container_dir = '/scratch/project_XXXXXXX/containers'
+
+    // Path to HLA-HD database
+    hlahd_db = '/scratch/project_XXXXXXX/databases/hlahd_db'
+}
+```
+
+### Step 4: Run Setup Script
 
 ```bash
 # Make setup script executable and run
