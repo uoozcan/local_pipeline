@@ -38,6 +38,9 @@ include { HLA_VISUALIZE; HLA_SUMMARY_REPORT } from './modules/visualize'
 // Import MultiQC module
 include { MULTIQC } from './modules/multiqc'
 
+// Import LOH module
+include { HLA_LOH; HLA_LOH_VISUALIZE; HLA_LOH_SUMMARY } from './modules/loh'
+
 // Help message
 def helpMessage() {
     log.info """
@@ -81,6 +84,12 @@ def helpMessage() {
         --expected_reads    Expected reads per allele for confidence (default: 1000)
         --weighting         Weighting method: equal, read_confidence, tool_quality
                             (default: read_confidence)
+
+    LOH (Loss of Heterozygosity) analysis:
+        --run_loh           Enable LOH analysis (requires SpecHLA, default: false)
+        --tumor_purity      Tumor purity estimate (0-1), required for LOH
+        --tumor_ploidy      Tumor ploidy estimate, required for LOH
+        --loh_het_cutoff    Minimum het SNPs for LOH call (default: 5)
 
     Output reports:
         - Per-sample: QC report, consensus HLA types, visualizations
@@ -379,6 +388,41 @@ workflow {
         ch_hla_reports,
         file("${projectDir}/assets/multiqc_config.yaml")
     )
+
+    // ===== LOH ANALYSIS (optional) =====
+    // Requires SpecHLA and tumor purity/ploidy estimates
+    if (params.run_loh && 'spechla' in tools_list && params.tumor_purity && params.tumor_ploidy) {
+        log.info "LOH analysis enabled with purity=${params.tumor_purity}, ploidy=${params.tumor_ploidy}"
+
+        // Get SpecHLA output directories for LOH analysis
+        if (input_type == 'bam') {
+            ch_spechla_for_loh = SPECHLA.out.full_results
+        } else {
+            ch_spechla_for_loh = SPECHLA_FASTQ.out.full_results
+        }
+
+        // Run LOH detection
+        HLA_LOH(
+            ch_spechla_for_loh,
+            params.tumor_purity,
+            params.tumor_ploidy
+        )
+
+        // Visualize LOH results
+        HLA_LOH_VISUALIZE(HLA_LOH.out.loh_results)
+
+        // Generate LOH summary if multiple samples
+        ch_all_loh = HLA_LOH.out.loh_results.map { sample_id, file -> file }.collect()
+        HLA_LOH_SUMMARY(ch_all_loh)
+
+    } else if (params.run_loh) {
+        if (!('spechla' in tools_list)) {
+            log.warn "LOH analysis requires SpecHLA. Add 'spechla' to --tools"
+        }
+        if (!params.tumor_purity || !params.tumor_ploidy) {
+            log.warn "LOH analysis requires --tumor_purity and --tumor_ploidy parameters"
+        }
+    }
 }
 
 // Workflow completion handler
@@ -397,6 +441,7 @@ workflow.onComplete {
       - QC reports:          ${params.outdir}/<sample>/qc/
       - HLA consensus:       ${params.outdir}/<sample>/
       - Visualizations:      ${params.outdir}/<sample>/visualizations/
+      - LOH analysis:        ${params.outdir}/<sample>/loh/ (if enabled)
       - Summary report:      ${params.outdir}/summary/
       - MultiQC report:      ${params.outdir}/multiqc/
     ===========================================

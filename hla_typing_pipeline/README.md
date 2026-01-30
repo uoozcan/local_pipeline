@@ -143,6 +143,15 @@ The pipeline automatically detects the input type from the samplesheet header.
 | `--expected_reads` | `1000` | Expected reads per allele (for confidence calculation) |
 | `--weighting` | `read_confidence` | Weighting method: `equal`, `read_confidence`, or `tool_quality` |
 
+### LOH (Loss of Heterozygosity) Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--run_loh` | `false` | Enable LOH analysis (requires SpecHLA) |
+| `--tumor_purity` | - | Tumor purity estimate (0-1), required for LOH |
+| `--tumor_ploidy` | - | Tumor ploidy estimate, required for LOH |
+| `--loh_het_cutoff` | `5` | Minimum heterozygous SNPs for LOH call |
+
 ### Resource Parameters
 
 | Parameter | Default | Description |
@@ -178,6 +187,10 @@ results/
 │   │   ├── SampleName_agreement.png     # Tool agreement heatmap
 │   │   ├── SampleName_report.html       # Interactive HTML report
 │   │   └── SampleName_statistics.json   # Statistics in JSON format
+│   ├── loh/                              # LOH analysis (if enabled)
+│   │   ├── SampleName_hla_loh.txt       # LOH results per gene
+│   │   ├── SampleName_loh_plot.png      # Copy number visualization
+│   │   └── SampleName_loh_report.html   # Interactive LOH report
 │   ├── SampleName_consensus.txt         # Consensus HLA types
 │   └── SampleName_comparison.txt        # Tool comparison matrix
 ├── summary/
@@ -360,6 +373,54 @@ The confidence score reflects both tool agreement and read support:
 - `0.75-0.99`: Good agreement, most tools support the call
 - `0.50-0.74`: Moderate agreement, consider reviewing
 - `<0.50`: Low confidence, manual review recommended
+
+## HLA Loss of Heterozygosity (LOH) Analysis
+
+The pipeline includes optional LOH detection for tumor samples. This feature identifies HLA allele loss events that may contribute to immune evasion.
+
+### Requirements
+
+- **SpecHLA** must be included in tools (uses frequency data from SpecHLA)
+- **Tumor purity** estimate (from tools like ABSOLUTE, ASCAT, or Sequenza)
+- **Tumor ploidy** estimate
+
+### Running LOH Analysis
+
+```bash
+nextflow run main.nf \
+    --input_bam tumor_sample.bam \
+    --tools spechla,hlahd \
+    --run_loh true \
+    --tumor_purity 0.75 \
+    --tumor_ploidy 2.1 \
+    -profile singularity
+```
+
+### LOH Output
+
+The LOH analysis produces:
+
+| File | Description |
+|------|-------------|
+| `*_hla_loh.txt` | Copy number and LOH status for each HLA gene |
+| `*_loh_plot.png` | Visualization of allele copy numbers |
+| `*_loh_report.html` | Interactive report with clinical interpretation |
+
+### LOH Output Format
+
+```
+Sample  HLA  Allele1    Allele2    CopyRatio  KeptHLA    LostHLA    LOH
+Sample1 A    A*02:01    A*03:01    2:0        A*02:01    A*03:01    Y
+Sample1 B    B*07:02    B*44:02    1:1        B*07:02    B*44:02    N
+```
+
+### Clinical Significance
+
+HLA LOH is a mechanism of immune evasion in tumors:
+- **LOH = Y**: One HLA allele is lost or significantly reduced
+- May impact response to immune checkpoint inhibitors
+- Affects eligibility for personalized cancer vaccines
+- Consider for patient stratification in immunotherapy trials
 
 ## Standalone Scripts
 
