@@ -1,16 +1,73 @@
-# Nextflow work directories
+# Nextflow
 work/
 .nextflow/
 .nextflow.log*
+*.html
+*.txt
+.nextflow.pid
+timeline*.html
+report*.html
+dag*.html
+trace*.txt
 
-# Results (can be regenerated)
-results*/
+# Results and output directories
+results/
+output/
+outputs/
+logs/
 
-# Large data files
+# Containers
+*.sif
+*.img
+singularity/
+docker/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# R
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test data
+test_data/
+test/
+testing/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Logs
+*.log
+*.out
+*.err
+
+# Data files (add patterns for your specific data)
 *.bam
-*.bam.bai
 *.cram
-*.crai
 *.fastq
 *.fastq.gz
 *.fq
@@ -18,60 +75,25 @@ results*/
 *.sam
 *.vcf
 *.vcf.gz
-*.bed
+*.bai
+*.crai
 
-# Reference databases (too large for git)
-hla_references/
-raw_bam/
-aligned_bam/
-temp_input*/
+# Large reference files
+references/
+genome/
+*.fa
+*.fasta
+*.fa.gz
+*.fasta.gz
 
-# SpecHLA local - keep scripts, exclude large files
-spechla_local/db/
-spechla_local/local_tools/
-spechla_local/local_bin/
-spechla_local/cmake-*/
-spechla_local/bin/
-spechla_local/script/
-spechla_local/spechla_env/
-spechla_local/*.fasta
-spechla_local/*.fa
-spechla_local/*.bt2
+# Except example data
+!test_data/example*
+!test/example*
 
-# Container images
-*.sif
-*.img
+# Environment files
+.env
+.env.local
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.pytest_cache/
-
-# IDE
-.vscode/
-.idea/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Temporary files
-*.tmp
-*.temp
-*.log
-
-# Windows WSL Zone.Identifier files
-*:Zone.Identifier
-
-# Backup files
-*.bak
-*.bak.*
-
-# Old/archive directories
-modules/x_old/
-app/
-
-# Test samples (data files)
-test_samples/*.bam
-test_samples/*.fastq.gz
+# Documentation builds
+site/
+docs/_build/
