@@ -159,6 +159,13 @@ The pipeline automatically detects the input type from the samplesheet header.
 | `--max_cpus` | `8` | Maximum CPUs per process |
 | `--max_memory` | `32.GB` | Maximum memory per process |
 
+### Tool Installation Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--spechla_path` | `${projectDir}/../spechla_local` | Path to local SpecHLA installation |
+| `--use_local_spechla` | `true` | Use local SpecHLA instead of container |
+
 ## Output
 
 ```
@@ -313,6 +320,35 @@ singularity pull optitype.sif docker://your-registry/optitype:latest
 ```
 
 Place containers in `hla_references/containers/`.
+
+### 2b. Local SpecHLA Installation (Alternative)
+
+Instead of using a container, you can use a local SpecHLA installation:
+
+```bash
+# Clone SpecHLA
+git clone https://github.com/deepomicslab/SpecHLA.git spechla_local
+cd spechla_local
+
+# Follow SpecHLA installation instructions
+# Make sure all dependencies are installed (bwa, samtools, etc.)
+```
+
+Configure in `nextflow.config`:
+```groovy
+params {
+    spechla_path = "/path/to/spechla_local"
+    use_local_spechla = true  // Set to false to use container instead
+}
+```
+
+Or pass on command line:
+```bash
+nextflow run main.nf \
+    --spechla_path /path/to/spechla_local \
+    --use_local_spechla true \
+    --input_bam sample.bam
+```
 
 ### 3. Prepare Databases
 

@@ -2,7 +2,7 @@
  * SpecHLA Module
  * High-resolution HLA typing from WGS/WES/RNA-seq data
  * Supports both BAM and FASTQ inputs
- * Uses Singularity container for execution
+ * Uses local installation (default) or Singularity container
  */
 
 process SPECHLA {
@@ -65,8 +65,9 @@ process SPECHLA {
 
     # Step 3: Run SpecHLA
     echo "[Step 3] Running SpecHLA..."
+    SPECHLA_PATH="${params.spechla_path}"
     cd ${sample_id}
-    bash /opt/SpecHLA/script/whole/SpecHLA.sh \
+    bash \${SPECHLA_PATH}/script/whole/SpecHLA.sh \
         -n ${sample_id} \
         -1 R1.fastq.gz \
         -2 R2.fastq.gz \
@@ -130,8 +131,9 @@ process SPECHLA_FASTQ {
 
     # Run SpecHLA
     echo "[Running SpecHLA from FASTQ...]"
+    SPECHLA_PATH="${params.spechla_path}"
     cd ${sample_id}
-    bash /opt/SpecHLA/script/whole/SpecHLA.sh \
+    bash \${SPECHLA_PATH}/script/whole/SpecHLA.sh \
         -n ${sample_id} \
         -1 R1.fastq.gz \
         -2 R2.fastq.gz \
