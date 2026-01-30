@@ -458,29 +458,48 @@ install_hlala() {
 
     # Download HLA*LA graphs
     log "Downloading HLA*LA reference graphs..."
+    mkdir -p "$INSTALL_DIR/hla_references/databases/hlala_graphs"
     cd "$INSTALL_DIR/hla_references/databases/hlala_graphs"
 
     if [[ ! -d "PRG_MHC_GRCh38_withIMGT" ]]; then
         # Download from HLA*LA repository
-        wget -q "http://www.well.ox.ac.uk/downloads/PRG_MHC_GRCh38_withIMGT.tar.gz" 2>/dev/null || \
+        log "Downloading PRG_MHC_GRCh38_withIMGT (this may take a while - ~30GB)..."
+        wget "http://www.well.ox.ac.uk/downloads/PRG_MHC_GRCh38_withIMGT.tar.gz" 2>&1 | tee -a "$INSTALL_DIR/$LOG_FILE" || \
             warn "Could not download HLA*LA graphs - may need manual download"
 
         if [[ -f "PRG_MHC_GRCh38_withIMGT.tar.gz" ]]; then
+            log "Extracting HLA*LA graphs..."
             tar -xzf PRG_MHC_GRCh38_withIMGT.tar.gz
             rm -f PRG_MHC_GRCh38_withIMGT.tar.gz
-            info "HLA*LA graphs downloaded"
+            info "HLA*LA graphs downloaded and extracted"
         fi
     else
         info "HLA*LA graphs already exist"
     fi
 
+    # Index the graphs if not already done (required for first run)
+    if [[ -d "PRG_MHC_GRCh38_withIMGT" ]] && [[ ! -f "PRG_MHC_GRCh38_withIMGT/serializedGRAPH" ]]; then
+        log "HLA*LA graphs need indexing on first run - this will happen automatically"
+        info "Note: First HLA*LA run will take longer due to graph indexing"
+    fi
+
     cd "$INSTALL_DIR"
+
+    # Create HLA*LA working directory structure
+    mkdir -p "$INSTALL_DIR/hla_references/hlala_workdir"
 
     # Verify
     if [[ -f "$INSTALL_DIR/hla_references/containers/hlala.sif" ]]; then
         info "HLA*LA container available"
     else
         warn "HLA*LA container not available"
+    fi
+
+    if [[ -d "$INSTALL_DIR/hla_references/databases/hlala_graphs/PRG_MHC_GRCh38_withIMGT" ]]; then
+        info "HLA*LA reference graphs available"
+    else
+        warn "HLA*LA reference graphs not found"
+        info "Download manually: wget http://www.well.ox.ac.uk/downloads/PRG_MHC_GRCh38_withIMGT.tar.gz"
     fi
 }
 
@@ -756,6 +775,13 @@ verify_installation() {
             echo -e "${YELLOW}[WARN]${NC} ${tool} container not available"
         fi
     done
+
+    # Check HLA*LA reference graphs
+    if [[ -d "$INSTALL_DIR/hla_references/databases/hlala_graphs/PRG_MHC_GRCh38_withIMGT" ]]; then
+        echo -e "${GREEN}[OK]${NC} HLA*LA reference graphs available"
+    else
+        echo -e "${YELLOW}[WARN]${NC} HLA*LA reference graphs not found (required for HLA*LA)"
+    fi
 
     # Check configuration
     if [[ -f "$INSTALL_DIR/hla_typing_pipeline/conf/user.config" ]]; then
