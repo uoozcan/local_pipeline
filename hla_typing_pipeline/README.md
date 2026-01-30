@@ -11,6 +11,7 @@ This pipeline integrates multiple HLA typing tools and applies majority voting t
 - **HLA\*LA**: Graph-based HLA typing using population reference graphs (BAM only)
 - **arcasHLA**: Fast HLA typing from RNA-seq data
 - **OptiType**: HLA Class I typing from various data types
+- **xHLA**: Fast k-mer based HLA typing from Human Longevity Inc. (BAM recommended)
 
 ## Features
 
@@ -291,6 +292,7 @@ For multi-sample runs, a summary report aggregates results across all samples:
 | HLA*LA | ✓ | ✗ | BAM only (requires alignment) |
 | arcasHLA | ✓ | ✓ | Full support |
 | OptiType | ✓ | ✓ | Full support |
+| xHLA | ✓ | △ | BAM recommended (FASTQ requires alignment) |
 
 ## Setup
 

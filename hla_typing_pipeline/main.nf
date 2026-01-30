@@ -18,12 +18,14 @@ include { HLAHD } from './modules/hlahd'
 include { HLALA } from './modules/hlala'
 include { ARCASHLA } from './modules/arcashla'
 include { OPTITYPE } from './modules/optitype'
+include { XHLA } from './modules/xhla'
 
 // Import modules - FASTQ versions
 include { SPECHLA_FASTQ } from './modules/spechla'
 include { HLAHD_FASTQ } from './modules/hlahd'
 include { ARCASHLA_FASTQ } from './modules/arcashla'
 include { OPTITYPE_FASTQ } from './modules/optitype'
+include { XHLA_FASTQ } from './modules/xhla'
 
 // Import QC and consensus modules
 include { QC_BAM; QC_FASTQ } from './modules/qc'
@@ -66,8 +68,8 @@ def helpMessage() {
         --outdir            Output directory (default: ./results)
         --reference         Reference genome: hg38 or hg19 (default: hg38)
         --tools             HLA typing tools to use (default: spechla,hlahd)
-                            Options: spechla,hlahd,hlala,arcashla,optitype
-                            Note: hlala only supports BAM input
+                            Options: spechla,hlahd,hlala,arcashla,optitype,xhla
+                            Note: hlala and xhla work best with BAM input
         --seq_type          Sequence type for OptiType: dna or rna (default: dna)
         --hlala_graph       HLA*LA graph (default: PRG_MHC_GRCh38_withIMGT)
         --hla_genes         HLA genes to type (default: classical HLA genes)
@@ -279,6 +281,14 @@ workflow {
             })
         }
 
+        // Run xHLA if requested
+        if ('xhla' in tools_list) {
+            XHLA(ch_input)
+            ch_results = ch_results.mix(XHLA.out.results.map { sample_id, result_file ->
+                [sample_id, 'xhla', result_file]
+            })
+        }
+
     } else {
         // ===== FASTQ INPUT WORKFLOW =====
         ch_fastq = create_fastq_channel()
@@ -329,6 +339,14 @@ workflow {
             OPTITYPE_FASTQ(ch_input, seq_type)
             ch_results = ch_results.mix(OPTITYPE_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'optitype', result_file]
+            })
+        }
+
+        // Run xHLA if requested (note: xHLA works best with BAM, FASTQ support is limited)
+        if ('xhla' in tools_list) {
+            XHLA_FASTQ(ch_input)
+            ch_results = ch_results.mix(XHLA_FASTQ.out.results.map { sample_id, result_file ->
+                [sample_id, 'xhla', result_file]
             })
         }
     }
