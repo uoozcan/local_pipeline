@@ -168,7 +168,10 @@ cd local_pipeline
 mkdir -p hla_references/containers
 mkdir -p hla_references/databases
 
-# Pull containers
+# Build the basetools container (required for QC and preprocessing)
+./hla_typing_pipeline/scripts/build_basetools.sh hla_references/containers
+
+# Pull HLA typing tool containers
 singularity pull hla_references/containers/hlahd.sif docker://quay.io/biocontainers/hlahd:1.7.0
 singularity pull hla_references/containers/arcashla.sif docker://quay.io/biocontainers/arcas-hla:0.5.0
 singularity pull hla_references/containers/optitype.sif docker://fred2/optitype:latest
@@ -176,7 +179,22 @@ singularity pull hla_references/containers/xhla.sif docker://humanlongevity/hla:
 
 # Download HLA-HD database (requires registration)
 # Visit: https://www.genome.med.kyoto-u.ac.jp/HLA-HD/
+
+# Test your container setup
+./hla_typing_pipeline/scripts/test_containers.sh hla_references/containers
 ```
+
+#### Required Containers
+
+| Container | Purpose |
+|-----------|---------|
+| `basetools.sif` | QC, preprocessing (samtools, fastqc, python) |
+| `spechla_1.0.7-3.sif` | SpecHLA HLA typing |
+| `arcashla.sif` | arcasHLA HLA typing |
+| `optitype.sif` | OptiType HLA Class I typing |
+| `hlahd.sif` | HLA-HD HLA typing |
+| `hlala.sif` | HLA*LA HLA typing (optional) |
+| `xhla.sif` | xHLA HLA typing (optional) |
 
 ### Step 4: Configure User Settings
 
@@ -544,10 +562,24 @@ sbatch hla_typing_pipeline/scripts/submit_hla_batch.sh
 | Issue | Solution |
 |-------|----------|
 | **Low HLA reads warning** | Increase sequencing depth or use HLA-enriched data |
-| **Container not found** | Check `container_dir` path in config |
+| **Container not found** | Check `container_dir` path in config, run `scripts/test_containers.sh` |
+| **basetools.sif missing** | Build it with `scripts/build_basetools.sh` |
+| **samtools not found** | Ensure containers have samtools or use basetools.sif |
 | **Out of memory** | Increase `--max_memory` parameter |
 | **BAM index missing** | Run `samtools index sample.bam` |
 | **Tool timeout** | Increase time limits in `nextflow.config` |
+| **QC process fails** | Check that basetools.sif is properly configured |
+
+### Verify Container Setup
+
+```bash
+# Test all containers
+./scripts/test_containers.sh /path/to/containers
+
+# Manual container test
+singularity exec container.sif samtools --version
+singularity exec container.sif python3 --version
+```
 
 ### Getting Help
 
