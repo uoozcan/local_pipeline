@@ -188,11 +188,12 @@ singularity pull hla_references/containers/xhla.sif docker://humanlongevity/hla:
 
 | Container | Purpose |
 |-----------|---------|
-| `basetools.sif` | QC, preprocessing (samtools, fastqc, python) |
-| `spechla_1.0.7-3.sif` | SpecHLA HLA typing |
-| `arcashla.sif` | arcasHLA HLA typing |
+| `spechla_with_spechap.sif` | SpecHLA with compiled SpecHap and ExtractHAIRs |
+| `arcashla.sif` | arcasHLA HLA typing + samtools for preprocessing |
 | `optitype.sif` | OptiType HLA Class I typing |
-| `hlahd.sif` | HLA-HD HLA typing |
+| `hla_postprocess.sif` | Visualization (matplotlib, pandas, multiqc) |
+| `fastqc.sif` | FastQC quality control |
+| `hlahd.sif` | HLA-HD HLA typing (optional) |
 | `hlala.sif` | HLA*LA HLA typing (optional) |
 | `xhla.sif` | xHLA HLA typing (optional) |
 
@@ -533,24 +534,82 @@ Patient1  HLA-C   C*07:01    C*05:01    1:1        N
 
 ## CSC Puhti Guide
 
-For detailed instructions on running on CSC Puhti supercomputer, see [docs/PUHTI_GUIDE.md](docs/PUHTI_GUIDE.md).
+### Prerequisites
 
-### Quick Setup on Puhti
+- CSC user account with project allocation
+- Access to `/projappl` and `/scratch` directories
+
+### Installation on Puhti
 
 ```bash
 # Login to Puhti
 ssh username@puhti.csc.fi
 
-# Navigate to scratch space
+# Clone the repository (to scratch for temporary storage)
 cd /scratch/project_XXXXXXX/$USER
+git clone https://github.com/uoozcan/local_pipeline.git
+cd local_pipeline/hla_typing_pipeline
 
-# Clone and setup
-git clone https://github.com/uoozcan/local_pipeline.git hla_analysis
-cd hla_analysis
-./hla_typing_pipeline/scripts/puhti_full_setup.sh
+# Run the installation script with your project ID
+bash scripts/install_puhti.sh project_XXXXXXX
 
-# Submit a job
-sbatch hla_typing_pipeline/scripts/submit_hla_batch.sh
+# Installation creates:
+# - /projappl/project_XXXXXXX/hla_typing/     (pipeline + containers)
+# - /scratch/project_XXXXXXX/hla_results/     (output directory)
+```
+
+### Running on Puhti
+
+#### Option 1: Interactive Use
+
+```bash
+# Load the environment
+source /projappl/project_XXXXXXX/hla_typing/load_env.sh
+
+# Run analysis on a BAM file
+run_hla --input_bam /path/to/sample.bam --tools spechla,arcashla
+
+# Or with FASTQ files
+run_hla --input_fastq_1 sample_R1.fq.gz --input_fastq_2 sample_R2.fq.gz
+```
+
+#### Option 2: Batch Job
+
+```bash
+# Submit a batch job
+sbatch /projappl/project_XXXXXXX/hla_typing/submit_hla.sh --bam /path/to/sample.bam
+
+# For multiple samples with a samplesheet
+source /projappl/project_XXXXXXX/hla_typing/load_env.sh
+run_hla --input_samplesheet samples.csv --tools spechla,arcashla
+```
+
+### Container Details
+
+The pipeline uses Singularity containers built following [CSC guidelines](https://docs.csc.fi/computing/containers/tykky/):
+
+| Container | Purpose | Build Method |
+|-----------|---------|--------------|
+| `spechla_with_spechap.sif` | SpecHLA with compiled SpecHap | Built from def file with --fakeroot |
+| `arcashla.sif` | arcasHLA HLA typing | Pulled from biocontainers |
+| `optitype.sif` | OptiType Class I typing | Pulled from Docker Hub |
+| `hla_postprocess.sif` | Visualization (matplotlib, pandas) | Built from def file |
+| `fastqc.sif` | Quality control | Pulled from biocontainers |
+
+### Troubleshooting on Puhti
+
+```bash
+# Check container builds
+ls -la /projappl/project_XXXXXXX/hla_typing/containers/
+
+# Test SpecHLA container
+singularity exec /projappl/project_XXXXXXX/hla_typing/containers/spechla_with_spechap.sif \
+    ls -la /opt/SpecHLA/bin/SpecHap/build/SpecHap
+
+# If container build fails on login node, use interactive session:
+sinteractive --account=project_XXXXXXX --mem=16G --time=02:00:00
+module load singularity
+singularity build --fakeroot container.sif container.def
 ```
 
 ---

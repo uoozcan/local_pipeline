@@ -2,8 +2,9 @@
  * SpecHLA Module
  * High-resolution HLA typing from WGS/WES/RNA-seq data
  * Supports both BAM and FASTQ inputs
- * Uses Singularity container (default) - spechla_1.0.7-3.sif
- * Container includes all dependencies (SpecHap, databases, etc.)
+ *
+ * Container mode (default): Uses spechla_with_spechap.sif with compiled SpecHap
+ * Local mode: Set params.use_local_spechla = true and params.spechla_path
  */
 
 process SPECHLA {
@@ -22,14 +23,33 @@ process SPECHLA {
 
     script:
     def ref = reference == 'hg19' ? 'hg19' : 'hg38'
+    def use_local = params.use_local_spechla ?: false
     """
+    # Set up SpecHLA environment
+    SPECHLA_PATH="${params.spechla_path}"
+
+    if [ "${use_local}" = "true" ]; then
+        # Local installation mode - may need custom library paths
+        export PATH="\${SPECHLA_PATH}/spechla_env/bin:\${SPECHLA_PATH}/bin:\${PATH}"
+        # Add local library path if set (for htslib compatibility)
+        if [ -n "${params.local_lib_path ?: ''}" ]; then
+            export LD_LIBRARY_PATH="${params.local_lib_path}:\${SPECHLA_PATH}/spechla_env/lib:\${LD_LIBRARY_PATH:-}"
+        else
+            export LD_LIBRARY_PATH="\${SPECHLA_PATH}/spechla_env/lib:\${LD_LIBRARY_PATH:-}"
+        fi
+    else
+        # Container mode - libraries are properly installed in /usr/local
+        export PATH="\${SPECHLA_PATH}/spechla_env/bin:\${SPECHLA_PATH}/bin:/usr/local/bin:\${PATH}"
+        export LD_LIBRARY_PATH="/usr/local/lib:\${SPECHLA_PATH}/spechla_env/lib:\${LD_LIBRARY_PATH:-}"
+    fi
+
     # Create output directory
     mkdir -p ${sample_id}
 
     # Check for BAM index, create if missing
     if [ ! -f "${bam}.bai" ] && [ ! -f "${bam.baseName}.bai" ]; then
         echo "Creating BAM index..."
-        samtools index -@ ${task.cpus} ${bam}
+        samtools index ${bam}
     fi
 
     # Determine chromosome naming convention
@@ -52,21 +72,23 @@ process SPECHLA {
 
     # Step 1: Extract HLA reads
     echo "[Step 1] Extracting HLA reads from \$HLA_REGION..."
-    samtools view -@ ${task.cpus} -b ${bam} \$HLA_REGION > ${sample_id}/hla_extract.bam
+    samtools view -b ${bam} \$HLA_REGION > ${sample_id}/hla_extract.bam
     samtools index ${sample_id}/hla_extract.bam
 
     # Step 2: Convert to FASTQ
     echo "[Step 2] Converting to FASTQ..."
-    samtools sort -n -@ ${task.cpus} ${sample_id}/hla_extract.bam -o ${sample_id}/namesort.bam
-    samtools fastq -@ ${task.cpus} \
-        -1 ${sample_id}/R1.fastq.gz \
-        -2 ${sample_id}/R2.fastq.gz \
+    samtools sort -n ${sample_id}/hla_extract.bam -o ${sample_id}/namesort.bam
+    # samtools 1.3.1 doesn't auto-compress, output to uncompressed then gzip
+    samtools fastq \
+        -1 ${sample_id}/R1.fastq \
+        -2 ${sample_id}/R2.fastq \
         -0 /dev/null -s /dev/null \
         ${sample_id}/namesort.bam
+    gzip ${sample_id}/R1.fastq
+    gzip ${sample_id}/R2.fastq
 
     # Step 3: Run SpecHLA
     echo "[Step 3] Running SpecHLA..."
-    SPECHLA_PATH="${params.spechla_path}"
     cd ${sample_id}
     bash \${SPECHLA_PATH}/script/whole/SpecHLA.sh \
         -n ${sample_id} \
@@ -117,7 +139,26 @@ process SPECHLA_FASTQ {
     path "versions.yml", emit: versions
 
     script:
+    def use_local = params.use_local_spechla ?: false
     """
+    # Set up SpecHLA environment
+    SPECHLA_PATH="${params.spechla_path}"
+
+    if [ "${use_local}" = "true" ]; then
+        # Local installation mode - may need custom library paths
+        export PATH="\${SPECHLA_PATH}/spechla_env/bin:\${SPECHLA_PATH}/bin:\${PATH}"
+        # Add local library path if set (for htslib compatibility)
+        if [ -n "${params.local_lib_path ?: ''}" ]; then
+            export LD_LIBRARY_PATH="${params.local_lib_path}:\${SPECHLA_PATH}/spechla_env/lib:\${LD_LIBRARY_PATH:-}"
+        else
+            export LD_LIBRARY_PATH="\${SPECHLA_PATH}/spechla_env/lib:\${LD_LIBRARY_PATH:-}"
+        fi
+    else
+        # Container mode - libraries are properly installed in /usr/local
+        export PATH="\${SPECHLA_PATH}/spechla_env/bin:\${SPECHLA_PATH}/bin:/usr/local/bin:\${PATH}"
+        export LD_LIBRARY_PATH="/usr/local/lib:\${SPECHLA_PATH}/spechla_env/lib:\${LD_LIBRARY_PATH:-}"
+    fi
+
     # Create output directory
     mkdir -p ${sample_id}
 
@@ -132,7 +173,6 @@ process SPECHLA_FASTQ {
 
     # Run SpecHLA
     echo "[Running SpecHLA from FASTQ...]"
-    SPECHLA_PATH="${params.spechla_path}"
     cd ${sample_id}
     bash \${SPECHLA_PATH}/script/whole/SpecHLA.sh \
         -n ${sample_id} \

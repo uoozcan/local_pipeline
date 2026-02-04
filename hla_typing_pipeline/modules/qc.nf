@@ -40,7 +40,7 @@ process QC_BAM {
     fi
 
     # Determine chromosome naming convention
-    CHR_PREFIX=\$(samtools view -H ${bam} | grep -m1 "^@SQ" | grep -oP "SN:\\K[^\\t]*" | grep -o "^chr" || echo "")
+    CHR_PREFIX=\$(samtools view -H ${bam} | grep -m1 "^@SQ" | sed 's/.*SN://' | cut -f1 | grep -o "^chr" || echo "")
 
     # Define HLA region based on reference
     if [ "${ref}" == "hg38" ]; then
@@ -70,16 +70,17 @@ process QC_BAM {
 
     # Calculate HLA read percentage
     if [ "\$TOTAL_READS" -gt 0 ]; then
-        HLA_PCT=\$(echo "scale=4; \$HLA_READS * 100 / \$TOTAL_READS" | bc)
+        HLA_PCT=\$(awk -v hla="\$HLA_READS" -v total="\$TOTAL_READS" 'BEGIN {printf "%.4f", hla * 100 / total}')
         echo "HLA read percentage: \${HLA_PCT}%" >> ${sample_id}_qc_report.txt
     fi
 
     # Average read length (sample first 10000 reads)
-    AVG_LENGTH=\$(samtools view ${bam} | head -10000 | awk '{sum+=length(\$10); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}')
+    # Use subshell with pipefail disabled to avoid SIGPIPE issues
+    AVG_LENGTH=\$(set +o pipefail; samtools view ${bam} 2>/dev/null | head -10000 | awk '{sum+=length(\$10); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}')
     echo "Average read length: \$AVG_LENGTH bp" >> ${sample_id}_qc_report.txt
 
     # Mapping quality statistics
-    AVG_MAPQ=\$(samtools view ${bam} | head -10000 | awk '{sum+=\$5; count++} END {if(count>0) printf "%.1f", sum/count; else print "0"}')
+    AVG_MAPQ=\$(set +o pipefail; samtools view ${bam} 2>/dev/null | head -10000 | awk '{sum+=\$5; count++} END {if(count>0) printf "%.1f", sum/count; else print "0"}')
     echo "Average mapping quality: \$AVG_MAPQ" >> ${sample_id}_qc_report.txt
 
     # Paired-end check
@@ -89,7 +90,7 @@ process QC_BAM {
 
         # Proper pairs
         PROPER_PAIRS=\$(samtools view -c -f 2 ${bam})
-        PROPER_PCT=\$(echo "scale=2; \$PROPER_PAIRS * 100 / \$PAIRED_READS" | bc)
+        PROPER_PCT=\$(awk -v proper="\$PROPER_PAIRS" -v paired="\$PAIRED_READS" 'BEGIN {printf "%.2f", proper * 100 / paired}')
         echo "Properly paired: \${PROPER_PCT}%" >> ${sample_id}_qc_report.txt
     else
         echo "Read type: Single-end" >> ${sample_id}_qc_report.txt
@@ -117,7 +118,7 @@ process QC_BAM {
     fi
 
     # Check mapping quality
-    if [ "\$(echo "\$AVG_MAPQ < 20" | bc)" -eq 1 ]; then
+    if awk -v mapq="\$AVG_MAPQ" 'BEGIN {exit !(mapq < 20)}'; then
         echo "WARNING: Low average mapping quality (\$AVG_MAPQ < 20)" >> ${sample_id}_qc_report.txt
         echo "  - Poor mapping may affect HLA typing accuracy" >> ${sample_id}_qc_report.txt
         WARNINGS="\${WARNINGS}LOW_MAPQ;"
@@ -208,7 +209,7 @@ process QC_FASTQ {
     fi
 
     TOTAL_READS=\$((R1_READS + R2_READS))
-    AVG_LENGTH=\$(echo "scale=0; (\$AVG_LENGTH_R1 + \$AVG_LENGTH_R2) / 2" | bc)
+    AVG_LENGTH=\$(awk -v r1="\$AVG_LENGTH_R1" -v r2="\$AVG_LENGTH_R2" 'BEGIN {printf "%.0f", (r1 + r2) / 2}')
 
     echo "R1 reads: \$R1_READS" >> ${sample_id}_qc_report.txt
     echo "R2 reads: \$R2_READS" >> ${sample_id}_qc_report.txt
@@ -219,7 +220,7 @@ process QC_FASTQ {
 
     # Check read count balance
     if [ \$R1_READS -ne \$R2_READS ]; then
-        DIFF=\$(echo "scale=2; (\$R1_READS - \$R2_READS) * 100 / \$R1_READS" | bc | tr -d '-')
+        DIFF=\$(awk -v r1="\$R1_READS" -v r2="\$R2_READS" 'BEGIN {d=(r1 - r2) * 100 / r1; if(d<0) d=-d; printf "%.2f", d}')
         echo "R1/R2 difference: \${DIFF}%" >> ${sample_id}_qc_report.txt
     fi
 
