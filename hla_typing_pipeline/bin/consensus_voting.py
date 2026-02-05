@@ -375,7 +375,7 @@ def parse_hlala_results(filepath: str, resolution: str = '2-field') -> Dict[str,
                     seen_alleles = set()
                     for i, allele in enumerate(parts[1:3]):
                         allele = allele.strip()
-                        if allele and allele not in ['-', '?']:
+                        if allele and allele not in ['-', '?', 'NA']:
                             normalized = normalize_allele(allele, resolution)
                             if normalized and normalized not in seen_alleles:
                                 quality = 1.0
@@ -385,12 +385,12 @@ def parse_hlala_results(filepath: str, resolution: str = '2-field') -> Dict[str,
                                 if header and 'quality' in header:
                                     try:
                                         quality = float(parts[header.index('quality')])
-                                    except:
+                                    except (ValueError, IndexError):
                                         pass
                                 elif len(parts) > 3:
                                     try:
                                         quality = float(parts[3])
-                                    except:
+                                    except (ValueError, IndexError):
                                         pass
 
                                 results[gene].append(AlleleCall(

@@ -231,7 +231,17 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
         info "xHLA container already exists"
     fi
 
-    # 5. SpecHLA with SpecHap container
+    # 5. HLA*LA container
+    log "Pulling HLA*LA container..."
+    if [[ ! -f "${CONTAINER_DIR}/hlala.sif" ]]; then
+        singularity pull "${CONTAINER_DIR}/hlala.sif" \
+            docker://quay.io/biocontainers/hla-la:latest 2>&1 || \
+            warn "Failed to pull HLA*LA container"
+    else
+        info "HLA*LA container already exists"
+    fi
+
+    # 6. SpecHLA with SpecHap container
     log "Building SpecHLA container with SpecHap..."
     if [[ ! -f "${CONTAINER_DIR}/spechla_with_spechap.sif" ]]; then
         SPECHLA_DEF="${INSTALL_DIR}/pipeline/containers/spechla_with_spechap.def"
@@ -263,7 +273,7 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
         info "SpecHLA container already exists"
     fi
 
-    # 5. Post-processing container with matplotlib
+    # 7. Post-processing container with matplotlib
     if [[ "$SKIP_POSTPROCESS" != true ]]; then
         log "Building post-processing container..."
         if [[ ! -f "${CONTAINER_DIR}/hla_postprocess.sif" ]]; then
@@ -351,6 +361,10 @@ process {
     }
     withName: 'XHLA|XHLA_FASTQ' {
         container = '${CONTAINER_DIR}/xhla.sif'
+    }
+    withName: 'HLALA' {
+        container = '${CONTAINER_DIR}/hlala.sif'
+        containerOptions = "--bind ${CONTAINER_DIR}/../hlala_graphs:/usr/local/bin/HLA-LA/graphs"
     }
     withName: 'FASTQC_BAM|FASTQC_FASTQ' {
         container = '${CONTAINER_DIR}/fastqc.sif'
@@ -484,7 +498,7 @@ else
 fi
 
 # Check containers
-for container in arcashla optitype fastqc xhla spechla_with_spechap hla_postprocess; do
+for container in arcashla optitype fastqc xhla hlala spechla_with_spechap hla_postprocess; do
     if [[ -f "${CONTAINER_DIR}/${container}.sif" ]]; then
         echo -e "${GREEN}[OK]${NC} Container: ${container}.sif"
     else
