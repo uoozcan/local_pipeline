@@ -14,8 +14,6 @@ process XHLA {
     publishDir "${params.outdir}/${sample_id}/xhla", mode: 'copy'
     errorStrategy 'ignore'
 
-    container "${params.container_dir}/xhla.sif"
-
     input:
     tuple val(sample_id), path(bam)
 
@@ -115,7 +113,9 @@ process XHLA {
         echo "B\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
         echo "C\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
         echo "DRB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DQA1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
         echo "DQB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DPA1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
         echo "DPB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
     fi
 
@@ -138,8 +138,6 @@ process XHLA_FASTQ {
     label 'process_medium'
     publishDir "${params.outdir}/${sample_id}/xhla", mode: 'copy'
     errorStrategy 'ignore'
-
-    container "${params.container_dir}/xhla.sif"
 
     input:
     tuple val(sample_id), path(fastq1), path(fastq2)
@@ -204,7 +202,9 @@ process XHLA_FASTQ {
         echo "B\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
         echo "C\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
         echo "DRB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DQA1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
         echo "DQB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        echo "DPA1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
         echo "DPB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
     fi
 

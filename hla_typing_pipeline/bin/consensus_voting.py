@@ -405,6 +405,48 @@ def parse_hlala_results(filepath: str, resolution: str = '2-field') -> Dict[str,
     return results
 
 
+def parse_xhla_results(filepath: str, resolution: str = '2-field') -> Dict[str, List[AlleleCall]]:
+    """
+    Parse xHLA result file.
+    xHLA does not report read counts (always NA), so reads is set to 0
+    and quality is set to 0.5 to reflect lower confidence in consensus voting.
+    """
+    results = defaultdict(list)
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or not line:
+                    continue
+
+                parts = line.split('\t')
+
+                if parts[0].lower() in ['gene', 'locus']:
+                    continue
+
+                if len(parts) >= 3:
+                    gene = parts[0].strip()
+                    if not gene.startswith('HLA-'):
+                        gene = f"HLA-{gene}"
+
+                    seen_alleles = set()
+                    for allele in parts[1:3]:
+                        allele = allele.strip()
+                        if allele and allele not in ['-', 'NA']:
+                            normalized = normalize_allele(allele, resolution)
+                            if normalized and normalized not in seen_alleles:
+                                results[gene].append(AlleleCall(
+                                    allele=normalized,
+                                    reads=0,
+                                    quality=0.5,
+                                    tool='xhla'
+                                ))
+                                seen_alleles.add(normalized)
+    except Exception as e:
+        print(f"Warning: Error parsing xHLA file {filepath}: {e}", file=sys.stderr)
+    return results
+
+
 def parse_results(tool: str, filepath: str, resolution: str = '2-field') -> Dict[str, List[AlleleCall]]:
     """Parse results based on tool type."""
     parsers = {
@@ -413,6 +455,7 @@ def parse_results(tool: str, filepath: str, resolution: str = '2-field') -> Dict
         'hlala': parse_hlala_results,
         'arcashla': parse_arcashla_results,
         'optitype': parse_optitype_results,
+        'xhla': parse_xhla_results,
     }
     parser = parsers.get(tool.lower())
     if parser:
