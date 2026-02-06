@@ -19,6 +19,8 @@ include { HLALA } from './modules/hlala'
 include { ARCASHLA } from './modules/arcashla'
 include { OPTITYPE } from './modules/optitype'
 include { XHLA } from './modules/xhla'
+include { BAMQC } from './modules/bamqc'
+include { FLOW_OPTITYPE } from './modules/flow_optitype'
 
 // Import modules - FASTQ versions
 include { SPECHLA_FASTQ } from './modules/spechla'
@@ -26,6 +28,7 @@ include { HLAHD_FASTQ } from './modules/hlahd'
 include { ARCASHLA_FASTQ } from './modules/arcashla'
 include { OPTITYPE_FASTQ } from './modules/optitype'
 include { XHLA_FASTQ } from './modules/xhla'
+include { BAMQC_FASTQ } from './modules/bamqc'
 
 // Import QC and consensus modules
 include { QC_BAM; QC_FASTQ } from './modules/qc'
@@ -71,6 +74,8 @@ def helpMessage() {
                             Options: spechla,hlahd,hlala,arcashla,optitype,xhla
                             Note: hlala and xhla work best with BAM input
         --seq_type          Sequence type for OptiType: dna or rna (default: dna)
+        --run_bamqc         Enable BAMQC for comprehensive BAM quality control (default: false)
+        --use_flow_optitype Use flow-optitype for direct BAM processing instead of standard OptiType (default: false)
         --hlala_graph       HLA*LA graph (default: PRG_MHC_GRCh38_withIMGT)
         --hla_genes         HLA genes to type (default: classical HLA genes)
         --resolution        Output resolution: 2-field or 4-field (default: 2-field)
@@ -273,12 +278,24 @@ workflow {
             })
         }
 
-        // Run OptiType if requested
+        // Run OptiType if requested (use flow-optitype if available, otherwise standard optitype)
         if ('optitype' in tools_list) {
-            OPTITYPE(ch_input)
-            ch_results = ch_results.mix(OPTITYPE.out.results.map { sample_id, result_file ->
-                [sample_id, 'optitype', result_file]
-            })
+            if (params.use_flow_optitype) {
+                FLOW_OPTITYPE(ch_input)
+                ch_results = ch_results.mix(FLOW_OPTITYPE.out.results.map { sample_id, result_file ->
+                    [sample_id, 'flow_optitype', result_file]
+                })
+            } else {
+                OPTITYPE(ch_input)
+                ch_results = ch_results.mix(OPTITYPE.out.results.map { sample_id, result_file ->
+                    [sample_id, 'optitype', result_file]
+                })
+            }
+        }
+
+        // Run BAMQC if requested
+        if (params.run_bamqc) {
+            BAMQC(ch_bam)
         }
 
         // Run xHLA if requested
