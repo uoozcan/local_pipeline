@@ -22,9 +22,9 @@ try:
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     import numpy as np
-    HAS_MATPLOTLIB = True
 except ImportError:
-    HAS_MATPLOTLIB = False
+    print("Error: matplotlib/numpy required. Install with: pip install matplotlib numpy", file=sys.stderr)
+    sys.exit(1)
 
 try:
     import pandas as pd
@@ -96,9 +96,6 @@ def calculate_allele_frequencies(all_data: List[Dict]) -> Dict[str, Counter]:
 
 def plot_allele_frequency(allele_freqs: Dict[str, Counter], output_dir: str, top_n: int = 5):
     """Create allele frequency plots for each gene."""
-    if not HAS_MATPLOTLIB:
-        return
-
     genes = sorted(allele_freqs.keys())
     n_genes = len(genes)
 
@@ -154,7 +151,7 @@ def plot_allele_frequency(allele_freqs: Dict[str, Counter], output_dir: str, top
 
 def plot_sample_quality_comparison(all_stats: List[Dict], output_dir: str):
     """Create sample quality comparison plot."""
-    if not HAS_MATPLOTLIB or not all_stats:
+    if not all_stats:
         return
 
     samples = []
@@ -211,7 +208,7 @@ def plot_sample_quality_comparison(all_stats: List[Dict], output_dir: str):
 
 def plot_confidence_distribution(all_stats: List[Dict], output_dir: str):
     """Create confidence score distribution across all samples."""
-    if not HAS_MATPLOTLIB or not all_stats:
+    if not all_stats:
         return
 
     all_confidences = []

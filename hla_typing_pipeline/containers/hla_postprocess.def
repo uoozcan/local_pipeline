@@ -1,0 +1,99 @@
+Bootstrap: docker
+From: python:3.10-slim
+
+%labels
+    Author HLA Typing Pipeline
+    Version 1.0
+    Description Post-processing container with visualization and reporting tools
+
+%post
+    # Prevent interactive prompts
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Update and install system dependencies
+    apt-get update && apt-get install -y \
+        wget \
+        curl \
+        git \
+        build-essential \
+        zlib1g-dev \
+        libbz2-dev \
+        liblzma-dev \
+        libcurl4-openssl-dev \
+        libncurses5-dev \
+        libffi-dev \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install samtools for basic BAM operations
+    cd /tmp
+    wget https://github.com/samtools/samtools/releases/download/1.19/samtools-1.19.tar.bz2
+    tar -xjf samtools-1.19.tar.bz2
+    cd samtools-1.19
+    ./configure --prefix=/usr/local --without-curses
+    make -j$(nproc)
+    make install
+    cd /tmp && rm -rf samtools-1.19*
+
+    # Install Python packages for visualization and reporting
+    pip install --no-cache-dir \
+        numpy>=1.21.0 \
+        pandas>=1.4.0 \
+        matplotlib>=3.5.0 \
+        seaborn>=0.11.0 \
+        jinja2>=3.0.0 \
+        scipy>=1.8.0 \
+        pillow>=9.0.0 \
+        openpyxl>=3.0.0 \
+        xlrd>=2.0.0 \
+        tabulate>=0.8.0 \
+        pyyaml>=6.0 \
+        multiqc>=1.14
+
+    # Verify matplotlib can be imported
+    python3 -c "import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt; print('Matplotlib OK')"
+
+    # Clean up
+    apt-get clean
+    rm -rf /tmp/* /root/.cache
+
+%environment
+    export PATH=/usr/local/bin:$PATH
+    export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+    # Use non-interactive matplotlib backend
+    export MPLBACKEND=Agg
+
+%runscript
+    exec python3 "$@"
+
+%test
+    echo "Testing HLA post-processing container..."
+    python3 --version
+    python3 -c "import numpy; print('numpy:', numpy.__version__)"
+    python3 -c "import pandas; print('pandas:', pandas.__version__)"
+    python3 -c "import matplotlib; print('matplotlib:', matplotlib.__version__)"
+    python3 -c "import seaborn; print('seaborn:', seaborn.__version__)"
+    python3 -c "import jinja2; print('jinja2:', jinja2.__version__)"
+    which samtools && samtools --version | head -1
+    which multiqc && multiqc --version
+    echo "Container test passed!"
+
+%help
+    HLA Post-processing Container
+
+    This container includes:
+    - Python 3.10 with scientific packages
+    - matplotlib, seaborn for visualization
+    - pandas, numpy for data processing
+    - jinja2 for report templating
+    - MultiQC for quality reports
+    - samtools for basic BAM operations
+
+    Usage:
+        singularity exec hla_postprocess.sif python3 script.py
+        singularity exec hla_postprocess.sif multiqc .
+
+    Build:
+        sudo singularity build hla_postprocess.sif hla_postprocess.def
+
+        Or without root (requires fakeroot):
+        singularity build --fakeroot hla_postprocess.sif hla_postprocess.def

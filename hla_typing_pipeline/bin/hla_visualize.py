@@ -22,10 +22,9 @@ try:
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
     import numpy as np
-    HAS_MATPLOTLIB = True
 except ImportError:
-    HAS_MATPLOTLIB = False
-    print("Warning: matplotlib not available, skipping plots", file=sys.stderr)
+    print("Error: matplotlib/numpy required. Install with: pip install matplotlib numpy", file=sys.stderr)
+    sys.exit(1)
 
 try:
     import pandas as pd
@@ -162,9 +161,6 @@ def parse_qc_report(filepath: str) -> Dict[str, Any]:
 
 def plot_confidence_chart(consensus_data: Dict, sample_id: str, output_dir: str):
     """Create bar chart showing confidence scores per HLA gene."""
-    if not HAS_MATPLOTLIB:
-        return
-
     genes = [a['gene'] for a in consensus_data['alleles']]
     confidences = [a['confidence'] for a in consensus_data['alleles']]
 
@@ -213,9 +209,6 @@ def plot_confidence_chart(consensus_data: Dict, sample_id: str, output_dir: str)
 
 def plot_read_coverage(consensus_data: Dict, sample_id: str, output_dir: str):
     """Create bar chart showing read counts per allele."""
-    if not HAS_MATPLOTLIB:
-        return
-
     genes = []
     reads1 = []
     reads2 = []
@@ -254,9 +247,6 @@ def plot_read_coverage(consensus_data: Dict, sample_id: str, output_dir: str):
 
 def plot_tool_agreement(comparison_data: Dict, sample_id: str, output_dir: str):
     """Create heatmap showing tool agreement across genes."""
-    if not HAS_MATPLOTLIB or not HAS_PANDAS:
-        return
-
     tools = comparison_data['tools']
     if not tools or not comparison_data['data']:
         return
@@ -322,9 +312,6 @@ def plot_tool_agreement(comparison_data: Dict, sample_id: str, output_dir: str):
 
 def plot_qc_summary(qc_data: Dict, sample_id: str, output_dir: str):
     """Create QC summary visualization."""
-    if not HAS_MATPLOTLIB:
-        return
-
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     # Plot 1: Read distribution pie chart

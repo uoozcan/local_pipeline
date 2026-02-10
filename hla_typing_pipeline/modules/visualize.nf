@@ -30,8 +30,8 @@ process HLA_VISUALIZE {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python3 --version | cut -d' ' -f2)
-        matplotlib: \$(python3 -c "import matplotlib; print(matplotlib.__version__)")
-        pandas: \$(python3 -c "import pandas; print(pandas.__version__)")
+        matplotlib: \$(python3 -c "import matplotlib; print(matplotlib.__version__)" 2>/dev/null || echo "N/A")
+        pandas: \$(python3 -c "import pandas; print(pandas.__version__)" 2>/dev/null || echo "N/A")
     END_VERSIONS
     """
 }

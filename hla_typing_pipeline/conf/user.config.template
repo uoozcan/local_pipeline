@@ -4,22 +4,33 @@
  * INSTRUCTIONS:
  * 1. Copy this file to 'user.config': cp user.config.template user.config
  * 2. Edit the values below to match your setup
- * 3. The pipeline will automatically use these settings
+ * 3. Run the pipeline with: nextflow run main.nf -c conf/user.config -profile singularity
  */
 
 params {
     // ============================================
-    // CSC PROJECT SETTINGS (REQUIRED)
+    // CSC PROJECT SETTINGS (REQUIRED for Puhti)
     // ============================================
     // Your CSC project ID (e.g., project_2001234)
     project = 'YOUR_PROJECT_ID_HERE'
 
     // ============================================
-    // CONTAINER PATHS (REQUIRED)
+    // CONTAINER PATHS (REQUIRED for Singularity execution)
     // ============================================
     // Directory containing Singularity container images (.sif files)
-    // Expected containers: spechla_1.0.7-3.sif, hlahd.sif, arcashla.sif, optitype.sif
+    // Required containers:
+    //   - basetools.sif     : samtools, fastqc, python, multiqc (for QC and preprocessing)
+    //   - spechla_1.0.7-3.sif : SpecHLA HLA typing tool
+    //   - hlahd.sif         : HLA-HD HLA typing tool
+    //   - arcashla.sif      : arcasHLA HLA typing tool
+    //   - optitype.sif      : OptiType HLA typing tool
+    //   - hlala.sif         : HLA*LA HLA typing tool (optional)
+    //   - xhla.sif          : xHLA HLA typing tool (optional)
     container_dir = '/scratch/YOUR_PROJECT_ID/containers'
+
+    // Base tools container (for QC, FastQC, consensus voting)
+    // Build with: bash scripts/build_basetools.sh
+    basetools_container = '/scratch/YOUR_PROJECT_ID/containers/basetools.sif'
 
     // ============================================
     // DATABASE PATHS (REQUIRED for HLA-HD and HLA*LA)
@@ -29,6 +40,17 @@ params {
 
     // HLA*LA graph directory (only needed if using hlala tool)
     hlala_graphs = '/scratch/YOUR_PROJECT_ID/databases/hlala_graphs'
+
+    // ============================================
+    // TOOL SELECTION
+    // ============================================
+    // Available tools: spechla, hlahd, arcashla, optitype, hlala, xhla
+    // Recommended combinations:
+    //   WGS: spechla,hlahd,hlala
+    //   WES: spechla,hlahd,arcashla
+    //   RNA-seq: arcashla,optitype,spechla
+    //   Quick analysis: arcashla,optitype
+    tools = 'spechla,arcashla,optitype'
 
     // ============================================
     // OUTPUT SETTINGS (OPTIONAL)
