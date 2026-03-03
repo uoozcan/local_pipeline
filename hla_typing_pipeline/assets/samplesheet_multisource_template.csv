@@ -1,0 +1,6 @@
+patient_id,sample_id,seq_type,bam_path,fastq_1,fastq_2
+P001,P001_WGS,WGS,/path/to/P001.wgs.bam,,
+P001,P001_WES,WES,/path/to/P001.wes.bam,,
+P001,P001_RNA,RNAseq,,/path/to/P001_R1.fastq.gz,/path/to/P001_R2.fastq.gz
+P002,P002_WES,WES,/path/to/P002.wes.bam,,
+P002,P002_RNA,RNAseq,,/path/to/P002_R1.fastq.gz,/path/to/P002_R2.fastq.gz

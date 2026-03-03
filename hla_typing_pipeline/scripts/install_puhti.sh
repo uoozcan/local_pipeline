@@ -241,7 +241,27 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
         info "HLA*LA container already exists"
     fi
 
-    # 6. SpecHLA with SpecHap container
+    # 6. BAMQC container
+    log "Pulling BAMQC container..."
+    if [[ ! -f "${CONTAINER_DIR}/bamqc.sif" ]]; then
+        singularity pull "${CONTAINER_DIR}/bamqc.sif" \
+            docker://kennethlim206/bamqc:latest 2>&1 || \
+            warn "Failed to pull BAMQC container"
+    else
+        info "BAMQC container already exists"
+    fi
+
+    # 7. flow-OptiType container
+    log "Pulling flow-OptiType container..."
+    if [[ ! -f "${CONTAINER_DIR}/flow_optitype.sif" ]]; then
+        singularity pull "${CONTAINER_DIR}/flow_optitype.sif" \
+            docker://nmdpbioinformatics/flow-optitype:latest 2>&1 || \
+            warn "Failed to pull flow-OptiType container"
+    else
+        info "flow-OptiType container already exists"
+    fi
+
+    # 8. SpecHLA with SpecHap container
     log "Building SpecHLA container with SpecHap..."
     if [[ ! -f "${CONTAINER_DIR}/spechla_with_spechap.sif" ]]; then
         SPECHLA_DEF="${INSTALL_DIR}/pipeline/containers/spechla_with_spechap.def"
@@ -273,7 +293,7 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
         info "SpecHLA container already exists"
     fi
 
-    # 7. Post-processing container with matplotlib
+    # 9. Post-processing container with matplotlib
     if [[ "$SKIP_POSTPROCESS" != true ]]; then
         log "Building post-processing container..."
         if [[ ! -f "${CONTAINER_DIR}/hla_postprocess.sif" ]]; then
@@ -365,6 +385,12 @@ process {
     withName: 'HLALA' {
         container = '${CONTAINER_DIR}/hlala.sif'
         containerOptions = "--bind ${CONTAINER_DIR}/../hlala_graphs:/usr/local/bin/HLA-LA/graphs"
+    }
+    withName: 'BAMQC|BAMQC_FASTQ' {
+        container = '${CONTAINER_DIR}/bamqc.sif'
+    }
+    withName: 'FLOW_OPTITYPE' {
+        container = '${CONTAINER_DIR}/flow_optitype.sif'
     }
     withName: 'FASTQC_BAM|FASTQC_FASTQ' {
         container = '${CONTAINER_DIR}/fastqc.sif'
@@ -498,7 +524,7 @@ else
 fi
 
 # Check containers
-for container in arcashla optitype fastqc xhla hlala spechla_with_spechap hla_postprocess; do
+for container in arcashla optitype fastqc xhla hlala bamqc flow_optitype spechla_with_spechap hla_postprocess; do
     if [[ -f "${CONTAINER_DIR}/${container}.sif" ]]; then
         echo -e "${GREEN}[OK]${NC} Container: ${container}.sif"
     else
