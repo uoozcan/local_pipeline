@@ -666,6 +666,7 @@ nextflow run main.nf \
     --min_hla_reads 1000 \
     --min_read_length 50 \
     --min_tools 1 \
+    --install_dir "${INSTALL_DIR}" \
     -profile singularity \
     -work-dir "\$WORK_DIR" \
     -c "${INSTALL_DIR}/conf/puhti.config" 2>&1
