@@ -16,7 +16,7 @@ process HLAHD {
 
     output:
     tuple val(sample_id), path("${sample_id}_hlahd.txt"), emit: results
-    tuple val(sample_id), path("${sample_id}/result/*"), emit: full_results, optional: true
+    tuple val(sample_id), path("${sample_id}/${sample_id}/result/*"), emit: full_results, optional: true
     path "versions.yml", emit: versions
 
     script:
@@ -47,14 +47,28 @@ process HLAHD {
     # Run HLA-HD
     echo "[Step 2] Running HLA-HD..."
     hlahd.sh -t ${task.cpus} -m 100 -c 0.95 -f ${params.hlahd_db}/freq_data \
-        R1.fastq R2.fastq ${params.hlahd_db}/HLA_gene.split ${params.hlahd_db}/dictionary \
+        R1.fastq R2.fastq ${params.hlahd_db}/HLA_gene.split.txt ${params.hlahd_db}/dictionary \
         ${sample_id} ${sample_id}
 
-    # Parse results
-    echo "[Step 3] Parsing results..."
-    mkdir -p ${sample_id}/result
-    if [ -f "${sample_id}/result/${sample_id}_final.result.txt" ]; then
-        cp ${sample_id}/result/${sample_id}_final.result.txt ${sample_id}_hlahd.txt
+    # Parse results with per-gene read counts
+    # Use cut to extract exactly 3 fields (avoids trailing fields for HLA-E etc.)
+    echo "[Step 3] Parsing results with read counts...]"
+
+    RESULT_DIR="${sample_id}/${sample_id}/result"
+    if [ -f "\${RESULT_DIR}/${sample_id}_final.result.txt" ]; then
+        while IFS='' read -r LINE; do
+            GENE=\$(printf '%s\n' "\$LINE" | cut -f1)
+            ALLELE1=\$(printf '%s\n' "\$LINE" | cut -f2)
+            ALLELE2=\$(printf '%s\n' "\$LINE" | cut -f3)
+            GENE_SHORT="\${GENE#HLA-}"
+            READ_FILE="\${RESULT_DIR}/${sample_id}_\${GENE_SHORT}.read.txt"
+            READS=0
+            if [ -f "\${READ_FILE}" ]; then
+                RAW=\$(awk 'NR==1{print \$2}' "\${READ_FILE}" 2>/dev/null)
+                [[ "\${RAW}" =~ ^[0-9]+\$ ]] && READS=\${RAW}
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\n' "\${GENE}" "\${ALLELE1}" "\${ALLELE2}" "\${READS}" "\${READS}"
+        done < "\${RESULT_DIR}/${sample_id}_final.result.txt" > ${sample_id}_hlahd.txt
     else
         echo "# HLA-HD results for ${sample_id}" > ${sample_id}_hlahd.txt
         echo "# No results generated" >> ${sample_id}_hlahd.txt
@@ -83,7 +97,7 @@ process HLAHD_FASTQ {
 
     output:
     tuple val(sample_id), path("${sample_id}_hlahd.txt"), emit: results
-    tuple val(sample_id), path("${sample_id}/result/*"), emit: full_results, optional: true
+    tuple val(sample_id), path("${sample_id}/${sample_id}/result/*"), emit: full_results, optional: true
     path "versions.yml", emit: versions
 
     script:
@@ -103,14 +117,26 @@ process HLAHD_FASTQ {
     # Run HLA-HD
     echo "[Running HLA-HD from FASTQ...]"
     hlahd.sh -t ${task.cpus} -m 100 -c 0.95 -f ${params.hlahd_db}/freq_data \
-        R1.fastq R2.fastq ${params.hlahd_db}/HLA_gene.split ${params.hlahd_db}/dictionary \
+        R1.fastq R2.fastq ${params.hlahd_db}/HLA_gene.split.txt ${params.hlahd_db}/dictionary \
         ${sample_id} ${sample_id}
 
-    # Parse results
-    echo "[Parsing results...]"
-    mkdir -p ${sample_id}/result
-    if [ -f "${sample_id}/result/${sample_id}_final.result.txt" ]; then
-        cp ${sample_id}/result/${sample_id}_final.result.txt ${sample_id}_hlahd.txt
+    # Parse results with per-gene read counts
+    echo "[Parsing results with read counts...]"
+    RESULT_DIR="${sample_id}/${sample_id}/result"
+    if [ -f "\${RESULT_DIR}/${sample_id}_final.result.txt" ]; then
+        while IFS='' read -r LINE; do
+            GENE=\$(printf '%s\n' "\$LINE" | cut -f1)
+            ALLELE1=\$(printf '%s\n' "\$LINE" | cut -f2)
+            ALLELE2=\$(printf '%s\n' "\$LINE" | cut -f3)
+            GENE_SHORT="\${GENE#HLA-}"
+            READ_FILE="\${RESULT_DIR}/${sample_id}_\${GENE_SHORT}.read.txt"
+            READS=0
+            if [ -f "\${READ_FILE}" ]; then
+                RAW=\$(awk 'NR==1{print \$2}' "\${READ_FILE}" 2>/dev/null)
+                [[ "\${RAW}" =~ ^[0-9]+\$ ]] && READS=\${RAW}
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\n' "\${GENE}" "\${ALLELE1}" "\${ALLELE2}" "\${READS}" "\${READS}"
+        done < "\${RESULT_DIR}/${sample_id}_final.result.txt" > ${sample_id}_hlahd.txt
     else
         echo "# HLA-HD results for ${sample_id}" > ${sample_id}_hlahd.txt
         echo "# No results generated" >> ${sample_id}_hlahd.txt

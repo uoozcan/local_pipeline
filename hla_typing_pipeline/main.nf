@@ -19,6 +19,7 @@ include { HLALA } from './modules/hlala'
 include { ARCASHLA } from './modules/arcashla'
 include { OPTITYPE } from './modules/optitype'
 include { XHLA } from './modules/xhla'
+include { HLASCAN } from './modules/hlascan'
 include { BAMQC } from './modules/bamqc'
 
 // Import modules - FASTQ versions
@@ -27,6 +28,9 @@ include { HLAHD_FASTQ } from './modules/hlahd'
 include { ARCASHLA_FASTQ } from './modules/arcashla'
 include { OPTITYPE_FASTQ } from './modules/optitype'
 include { XHLA_FASTQ } from './modules/xhla'
+include { HLASCAN_FASTQ } from './modules/hlascan'
+include { T1K_FASTQ; T1K_LONGREADS } from './modules/t1k'
+include { HIFIHLA } from './modules/hifihla'
 include { BAMQC_FASTQ } from './modules/bamqc'
 
 // Import QC and consensus modules
@@ -37,7 +41,7 @@ include { CONSENSUS } from './modules/consensus'
 include { FASTQC_BAM; FASTQC_FASTQ } from './modules/fastqc'
 
 // Import visualization modules
-include { HLA_VISUALIZE; HLA_SUMMARY_REPORT } from './modules/visualize'
+include { HLA_VISUALIZE; HLA_SUMMARY_REPORT; HLA_PIPELINE_METRICS } from './modules/visualize'
 
 // Import MultiQC module
 include { MULTIQC } from './modules/multiqc'
@@ -76,10 +80,14 @@ def helpMessage() {
         --outdir            Output directory (default: ./results)
         --reference         Reference genome: hg38 or hg19 (default: hg38)
         --tools             HLA typing tools to use (default: spechla,hlahd)
-                            Options: spechla,hlahd,hlala,arcashla,optitype,xhla
+                            Options: spechla,hlahd,hlala,arcashla,optitype,xhla,hlascan
                             Note: hlala and xhla work best with BAM input
+                            Note: hlascan requires full genome BAM + hg19 reference (v2.1 limitation)
                             In multi-source mode, tools are also filtered by seq_type compatibility
-        --seq_type          Sequence type for OptiType: dna or rna (default: dna)
+        --seq_type          Sequence type: dna, rna, longreads_hifi, longreads_ont (default: dna)
+                            dna / rna: short-read WGS/WES or RNA-seq (paired FASTQ or BAM)
+                            longreads_hifi: PacBio HiFi/CCS BAM → T1K + HiFi-HLA (4-field)
+                            longreads_ont:  Oxford Nanopore BAM  → T1K (long-read preset)
                             In multi-source mode, RNAseq samples auto-use --rna flag
         --run_bamqc         Enable BAMQC for comprehensive BAM quality control (default: false)
         --hlala_graph       HLA*LA graph (default: PRG_MHC_GRCh38_withIMGT)
@@ -175,11 +183,16 @@ if (params.input_bam) {
 }
 
 // Tool compatibility map for multi-source mode
+// hlascan: WGS/WES only (requires full genome BAM + hg19); excluded from RNA/targeted
+// longreads_hifi: PacBio HiFi BAM  → T1K (long-read mode) + HiFi-HLA (4-field)
+// longreads_ont:  Oxford Nanopore  → T1K (long-read mode)
 def SEQ_TYPE_TOOLS = [
-    'WGS'     : ['spechla', 'hlahd', 'hlala', 'arcashla', 'optitype', 'xhla'],
-    'WES'     : ['spechla', 'hlahd', 'optitype', 'xhla'],
-    'RNAseq'  : ['arcashla', 'optitype'],
-    'targeted': ['optitype', 'hlahd'],
+    'WGS'            : ['spechla', 'hlahd', 'hlala', 'arcashla', 'optitype', 'xhla', 'hlascan', 't1k'],
+    'WES'            : ['spechla', 'hlahd', 'optitype', 'xhla', 'hlascan', 't1k'],
+    'RNAseq'         : ['arcashla', 'optitype', 't1k'],
+    'targeted'       : ['optitype', 'hlahd'],
+    'longreads_hifi' : ['t1k', 'hifihla'],
+    'longreads_ont'  : ['t1k'],
 ]
 
 // Resolve effective tools for a given seq_type and global tools_list
@@ -357,6 +370,37 @@ workflow {
             })
         }
 
+        // Run HLAscan if requested (BAM input; hg19 only in v2.1 container)
+        if ('hlascan' in tools_list) {
+            HLASCAN(ch_input)
+            ch_results = ch_results.mix(HLASCAN.out.results.map { sample_id, result_file ->
+                [sample_id, 'hlascan', result_file]
+            })
+        }
+
+        // ── Long-read tools (activated via --seq_type longreads_hifi / longreads_ont) ──
+        // Short-read tools above are implicitly skipped because resolveTools() returns
+        // only ['t1k', 'hifihla'] or ['t1k'] for these seq_types; the `in tools_list`
+        // guards above will still match if the user explicitly listed those tools, but
+        // for typical use the long-read seq_types will not include short-read tools.
+
+        // T1K long-read mode (HiFi or ONT)
+        if ('t1k' in tools_list && params.seq_type in ['longreads_hifi', 'longreads_ont']) {
+            def lr_platform = params.seq_type == 'longreads_hifi' ? 'hifi' : 'ont'
+            T1K_LONGREADS(ch_input, lr_platform)
+            ch_results = ch_results.mix(T1K_LONGREADS.out.results.map { sample_id, result_file ->
+                [sample_id, 't1k', result_file]
+            })
+        }
+
+        // HiFi-HLA (4-field resolution; PacBio HiFi only)
+        if ('hifihla' in tools_list && params.seq_type == 'longreads_hifi') {
+            HIFIHLA(ch_input)
+            ch_results = ch_results.mix(HIFIHLA.out.results.map { sample_id, result_file ->
+                [sample_id, 'hifihla', result_file]
+            })
+        }
+
     } else if (input_type == 'fastq') {
         // ===== FASTQ INPUT WORKFLOW =====
         ch_fastq = create_fastq_channel()
@@ -415,6 +459,22 @@ workflow {
             XHLA_FASTQ(ch_input)
             ch_results = ch_results.mix(XHLA_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'xhla', result_file]
+            })
+        }
+
+        // Run HLAscan if requested (FASTQ mode; limited by gene-resolution issue with HLA-enriched reads)
+        if ('hlascan' in tools_list) {
+            HLASCAN_FASTQ(ch_input)
+            ch_results = ch_results.mix(HLASCAN_FASTQ.out.results.map { sample_id, result_file ->
+                [sample_id, 'hlascan', result_file]
+            })
+        }
+
+        // Run T1K if requested (WGS/RNA-seq, Class I + II, fast ~5 min)
+        if ('t1k' in tools_list) {
+            T1K_FASTQ(ch_input)
+            ch_results = ch_results.mix(T1K_FASTQ.out.results.map { sample_id, result_file ->
+                [sample_id, 't1k', result_file]
             })
         }
 
@@ -529,6 +589,35 @@ workflow {
             )
             ch_results = ch_results.mix(XHLA.out.results.map { sample_id, result_file ->
                 [sample_id, 'xhla', result_file]
+            })
+
+            // T1K long-read mode — longreads_hifi / longreads_ont BAM samples
+            ch_lr_bam = ch_ms_bam_validated
+                .filter { sample_id, bam, seq_type, patient_id ->
+                    't1k' in resolveTools(seq_type, tools_list) &&
+                    seq_type in ['longreads_hifi', 'longreads_ont']
+                }
+            T1K_LONGREADS(
+                ch_lr_bam.map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] },
+                ch_lr_bam.map { sample_id, bam, seq_type, patient_id ->
+                    seq_type == 'longreads_hifi' ? 'hifi' : 'ont'
+                }
+            )
+            ch_results = ch_results.mix(T1K_LONGREADS.out.results.map { sample_id, result_file ->
+                [sample_id, 't1k', result_file]
+            })
+
+            // HiFi-HLA — longreads_hifi BAM samples only
+            HIFIHLA(
+                ch_ms_bam_validated
+                    .filter { sample_id, bam, seq_type, patient_id ->
+                        'hifihla' in resolveTools(seq_type, tools_list) &&
+                        seq_type == 'longreads_hifi'
+                    }
+                    .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] }
+            )
+            ch_results = ch_results.mix(HIFIHLA.out.results.map { sample_id, result_file ->
+                [sample_id, 'hifihla', result_file]
             })
         }
 
@@ -769,6 +858,27 @@ workflow.onComplete {
       - Multi-source:        ${params.outdir}/<patient_id>/integrated/ (if multi-source input)
       - Summary report:      ${params.outdir}/summary/
       - MultiQC report:      ${params.outdir}/multiqc/
+      - Pipeline metrics:    ${params.outdir}/pipeline_info/execution_metrics_report.html
     ===========================================
     """
+
+    // Generate pipeline execution metrics after trace file is finalised
+    if (workflow.success) {
+        def pipelineInfoDir = file("${params.outdir}/pipeline_info")
+        def traceFiles = pipelineInfoDir.listFiles()?.findAll { it.name.startsWith("trace_") && it.name.endsWith(".txt") }
+        if (traceFiles) {
+            def latestTrace = traceFiles.sort { it.lastModified() }.last()
+            log.info "Generating pipeline execution metrics from ${latestTrace.name} ..."
+            def cmd = "hla_pipeline_metrics.py --trace ${latestTrace} --outdir ${pipelineInfoDir}"
+            def proc = ["bash", "-c", cmd].execute()
+            proc.waitForOrKill(120_000)  // wait up to 2 min
+            if (proc.exitValue() == 0) {
+                log.info "Pipeline metrics saved to ${pipelineInfoDir}/execution_metrics_report.html"
+            } else {
+                log.warn "Pipeline metrics script exited with code ${proc.exitValue()} — check container has plotly installed"
+            }
+        } else {
+            log.warn "No trace file found in ${pipelineInfoDir} — skipping pipeline metrics"
+        }
+    }
 }

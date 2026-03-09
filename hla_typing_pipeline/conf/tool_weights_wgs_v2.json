@@ -1,0 +1,135 @@
+{
+  "method": "normalized_concordance",
+  "resolution": "2-field",
+  "data_type": "wgs",
+  "n_samples": 17,
+  "description": "Per-gene normalized 2-field concordance weights derived from 1000 Genomes Project ground-truth HLA types (Gourraud et al. 2014). Weights per gene sum to 1.0 across tools that cover that gene.",
+  "genes": {
+    "A": {
+      "hlahd": 0.4091,
+      "spechla": 0.0909,
+      "arcashla": 0.0,
+      "optitype": 0.5,
+      "hlala": 0.0,
+      "xhla": 0.0
+    },
+    "B": {
+      "hlahd": 0.119,
+      "spechla": 0.0476,
+      "arcashla": 0.0714,
+      "optitype": 0.3571,
+      "hlala": 0.0,
+      "xhla": 0.4048
+    },
+    "C": {
+      "hlahd": 0.0833,
+      "spechla": 0.25,
+      "arcashla": 0.0833,
+      "optitype": 0.5833,
+      "hlala": 0.0,
+      "xhla": 0.0
+    },
+    "DRB1": {
+      "hlahd": 0.275,
+      "spechla": 0.175,
+      "arcashla": 0.125,
+      "optitype": 0.0,
+      "hlala": 0.0,
+      "xhla": 0.425
+    },
+    "DQA1": {
+      "hlahd": 0.25,
+      "spechla": 0.25,
+      "arcashla": 0.25,
+      "optitype": 0.0,
+      "hlala": 0.25,
+      "xhla": 0.0
+    },
+    "DQB1": {
+      "hlahd": 0.2564,
+      "spechla": 0.2564,
+      "arcashla": 0.0513,
+      "optitype": 0.0,
+      "hlala": 0.0,
+      "xhla": 0.4359
+    },
+    "DPA1": {
+      "hlahd": 0.25,
+      "spechla": 0.25,
+      "arcashla": 0.25,
+      "optitype": 0.0,
+      "hlala": 0.25,
+      "xhla": 0.0
+    },
+    "DPB1": {
+      "hlahd": 0.2,
+      "spechla": 0.2,
+      "arcashla": 0.2,
+      "optitype": 0.0,
+      "hlala": 0.2,
+      "xhla": 0.2
+    }
+  },
+  "raw_accuracy": {
+    "hlahd": {
+      "A": 0.5294,
+      "B": 0.2941,
+      "C": 0.0588,
+      "DRB1": 0.6471,
+      "DQA1": 0.0,
+      "DQB1": 0.5882,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "spechla": {
+      "A": 0.1176,
+      "B": 0.1176,
+      "C": 0.1765,
+      "DRB1": 0.4118,
+      "DQA1": 0.0,
+      "DQB1": 0.5882,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "arcashla": {
+      "A": 0.0,
+      "B": 0.1765,
+      "C": 0.0588,
+      "DRB1": 0.2941,
+      "DQA1": 0.0,
+      "DQB1": 0.1176,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "optitype": {
+      "A": 0.6471,
+      "B": 0.8824,
+      "C": 0.4118,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "hlala": {
+      "A": 0.0,
+      "B": 0.0,
+      "C": 0.0,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "xhla": {
+      "A": 0.0,
+      "B": 1.0,
+      "C": 0.0,
+      "DRB1": 1.0,
+      "DQA1": 0.0,
+      "DQB1": 1.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    }
+  }
+}

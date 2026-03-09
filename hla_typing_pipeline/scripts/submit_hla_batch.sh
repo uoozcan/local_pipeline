@@ -41,7 +41,7 @@ fi
 BASE_DIR="/scratch/${PROJECT_ID}/${USER}/hla_analysis"
 
 # Default parameters
-TOOLS="spechla,hlahd"
+TOOLS="hlahd,spechla,arcashla"
 REFERENCE="hg38"
 RESOLUTION="2-field"
 SEQ_TYPE="dna"

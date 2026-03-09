@@ -1,0 +1,117 @@
+{
+  "method": "normalized_concordance",
+  "resolution": "2-field",
+  "data_type": "wgs",
+  "n_samples": 5,
+  "description": "Per-gene normalized 2-field concordance weights derived from 1000 Genomes Project ground-truth HLA types (Gourraud et al. 2014). Weights per gene sum to 1.0 across tools that cover that gene.",
+  "genes": {
+    "A": {
+      "hlahd": 0.3333,
+      "spechla": 0.1667,
+      "arcashla": 0.0,
+      "optitype": 0.5,
+      "xhla": 0.0
+    },
+    "B": {
+      "hlahd": 0.0,
+      "spechla": 0.0,
+      "arcashla": 0.0,
+      "optitype": 1.0,
+      "xhla": 0.0
+    },
+    "C": {
+      "hlahd": 0.2,
+      "spechla": 0.2,
+      "arcashla": 0.0,
+      "optitype": 0.6,
+      "xhla": 0.0
+    },
+    "DRB1": {
+      "hlahd": 0.25,
+      "spechla": 0.25,
+      "arcashla": 0.25,
+      "optitype": 0.0,
+      "xhla": 0.25
+    },
+    "DQA1": {
+      "hlahd": 0.3333,
+      "spechla": 0.3333,
+      "arcashla": 0.3333,
+      "optitype": 0.0,
+      "xhla": 0.0
+    },
+    "DQB1": {
+      "hlahd": 0.25,
+      "spechla": 0.25,
+      "arcashla": 0.25,
+      "optitype": 0.0,
+      "xhla": 0.25
+    },
+    "DPA1": {
+      "hlahd": 0.3333,
+      "spechla": 0.3333,
+      "arcashla": 0.3333,
+      "optitype": 0.0,
+      "xhla": 0.0
+    },
+    "DPB1": {
+      "hlahd": 0.25,
+      "spechla": 0.25,
+      "arcashla": 0.25,
+      "optitype": 0.0,
+      "xhla": 0.25
+    }
+  },
+  "raw_accuracy": {
+    "hlahd": {
+      "A": 0.6667,
+      "B": 0.0,
+      "C": 0.3333,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "spechla": {
+      "A": 0.3333,
+      "B": 0.0,
+      "C": 0.3333,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "arcashla": {
+      "A": 0.0,
+      "B": 0.0,
+      "C": 0.0,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "optitype": {
+      "A": 1.0,
+      "B": 0.3333,
+      "C": 1.0,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "xhla": {
+      "A": 0.0,
+      "B": 0.0,
+      "C": 0.0,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    }
+  }
+}

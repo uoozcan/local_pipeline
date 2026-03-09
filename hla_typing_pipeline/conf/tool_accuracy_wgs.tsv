@@ -1,0 +1,6 @@
+Tool	Data_type	N_samples	A	B	C	Mean_concordance
+arcashla	wgs	0	NA	NA	NA	NA
+hlahd	wgs	5	0.667	0.000	0.333	0.333
+optitype	wgs	5	1.000	0.333	1.000	0.778
+spechla	wgs	5	0.333	0.000	0.333	0.222
+xhla	wgs	1	0.000	0.000	0.000	0.000

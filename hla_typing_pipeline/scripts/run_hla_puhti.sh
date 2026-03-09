@@ -41,7 +41,7 @@ MEM="180G"
 CPUS="40"
 
 # Default pipeline settings
-TOOLS="spechla,hlahd"
+TOOLS="hlahd,spechla,arcashla"
 REFERENCE="hg38"
 OUTDIR="${BASE_DIR}/results"
 
@@ -63,8 +63,8 @@ INPUT OPTIONS (choose one):
   --bam-dir <dir>             Process all BAM files in directory
 
 PIPELINE OPTIONS:
-  --tools <list>              HLA tools (default: spechla,hlahd)
-                              Options: spechla,hlahd,hlala,arcashla,optitype
+  --tools <list>              HLA tools (default: hlahd,spechla,arcashla)
+                              Options: hlahd,spechla,arcashla,xhla,optitype,hlala
   --reference <ref>           Reference: hg38 or hg19 (default: hg38)
   --resolution <res>          Resolution: 2-field or 4-field (default: 2-field)
   --seq-type <type>           Sequence type for OptiType: dna or rna (default: dna)
@@ -98,7 +98,7 @@ EXAMPLES:
   $(basename "$0") --bam sample.bam --interactive --time 04:00:00
 
   # Use multiple tools
-  $(basename "$0") --bam sample.bam --tools spechla,hlahd,arcashla,optitype
+  $(basename "$0") --bam sample.bam --tools hlahd,spechla,arcashla,xhla,optitype
 
 EOF
     exit 0

@@ -48,7 +48,7 @@ BAM_DIR="${BAM_DIR:-${BASE_DIR}/input/bam}"
 FASTQ_DIR="${FASTQ_DIR:-${BASE_DIR}/input/fastq}"
 
 # Default parameters
-TOOLS="${TOOLS:-spechla,hlahd}"
+TOOLS="${TOOLS:-hlahd,spechla,arcashla}"
 REFERENCE="${REFERENCE:-hg38}"
 RESOLUTION="${RESOLUTION:-2-field}"
 SEQ_TYPE="${SEQ_TYPE:-dna}"

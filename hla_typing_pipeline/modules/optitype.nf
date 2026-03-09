@@ -8,6 +8,7 @@ process OPTITYPE {
     tag "$sample_id"
     label 'process_medium'
     publishDir "${params.outdir}/${sample_id}/optitype", mode: 'copy'
+    errorStrategy 'ignore'
 
     input:
     tuple val(sample_id), path(bam)
@@ -51,9 +52,9 @@ with open('\${result_tsv}', 'r') as f:
 with open('${sample_id}_optitype.txt', 'w') as out:
     out.write("# OptiType results for ${sample_id}\\n")
     out.write("Gene\\tAllele1\\tAllele2\\n")
-    out.write(f"HLA-A\\t{row.get('A1', '-')}\\t{row.get('A2', '-')}\\n")
-    out.write(f"HLA-B\\t{row.get('B1', '-')}\\t{row.get('B2', '-')}\\n")
-    out.write(f"HLA-C\\t{row.get('C1', '-')}\\t{row.get('C2', '-')}\\n")
+    out.write("HLA-A\\t{}\\t{}\\n".format(row.get('A1', '-'), row.get('A2', '-')))
+    out.write("HLA-B\\t{}\\t{}\\n".format(row.get('B1', '-'), row.get('B2', '-')))
+    out.write("HLA-C\\t{}\\t{}\\n".format(row.get('C1', '-'), row.get('C2', '-')))
 EOF
     else
         echo "# OptiType results for ${sample_id}" > ${sample_id}_optitype.txt
@@ -75,6 +76,7 @@ process OPTITYPE_FASTQ {
     tag "$sample_id"
     label 'process_medium'
     publishDir "${params.outdir}/${sample_id}/optitype", mode: 'copy'
+    errorStrategy 'ignore'
 
     input:
     tuple val(sample_id), path(fastq1), path(fastq2)
@@ -124,9 +126,9 @@ with open('\${result_tsv}', 'r') as f:
 with open('${sample_id}_optitype.txt', 'w') as out:
     out.write("# OptiType results for ${sample_id}\\n")
     out.write("Gene\\tAllele1\\tAllele2\\n")
-    out.write(f"HLA-A\\t{row.get('A1', '-')}\\t{row.get('A2', '-')}\\n")
-    out.write(f"HLA-B\\t{row.get('B1', '-')}\\t{row.get('B2', '-')}\\n")
-    out.write(f"HLA-C\\t{row.get('C1', '-')}\\t{row.get('C2', '-')}\\n")
+    out.write("HLA-A\\t{}\\t{}\\n".format(row.get('A1', '-'), row.get('A2', '-')))
+    out.write("HLA-B\\t{}\\t{}\\n".format(row.get('B1', '-'), row.get('B2', '-')))
+    out.write("HLA-C\\t{}\\t{}\\n".format(row.get('C1', '-'), row.get('C2', '-')))
 EOF
     else
         echo "# OptiType results for ${sample_id}" > ${sample_id}_optitype.txt

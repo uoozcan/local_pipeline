@@ -65,3 +65,32 @@ process HLA_SUMMARY_REPORT {
     END_VERSIONS
     """
 }
+
+process HLA_PIPELINE_METRICS {
+    tag "pipeline_metrics"
+    label 'process_low'
+    publishDir "${params.outdir}/pipeline_info", mode: 'copy'
+    errorStrategy 'ignore'
+
+    input:
+    path(trace_file)
+
+    output:
+    path("metrics_*.png"),                    emit: plots,  optional: true
+    path("execution_metrics_report.html"),    emit: report, optional: true
+
+    script:
+    """
+    hla_pipeline_metrics.py \\
+        --trace ${trace_file} \\
+        --outdir . \\
+        --system-ram ${task.memory ? (task.memory.toGiga() as int) : 14}
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: \$(python3 --version | cut -d' ' -f2)
+        matplotlib: \$(python3 -c "import matplotlib; print(matplotlib.__version__)" 2>/dev/null || echo "N/A")
+        plotly: \$(python3 -c "import plotly; print(plotly.__version__)" 2>/dev/null || echo "N/A")
+    END_VERSIONS
+    """
+}

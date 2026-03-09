@@ -79,6 +79,7 @@ INSTALL_DIR=""
 SCRATCH_DIR=""
 SKIP_CONTAINERS=false
 SKIP_POSTPROCESS=false
+INCLUDE_LONGREADS=false
 
 # First argument should be project ID
 if [[ $# -lt 1 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
@@ -98,8 +99,9 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         --scratch-dir) SCRATCH_DIR="$2"; shift 2 ;;
-        --skip-containers) SKIP_CONTAINERS=true; shift ;;
+        --skip-containers)  SKIP_CONTAINERS=true;  shift ;;
         --skip-postprocess) SKIP_POSTPROCESS=true; shift ;;
+        --include-longreads) INCLUDE_LONGREADS=true; shift ;;
         --help|-h) show_help ;;
         *) error "Unknown option: $1" ;;
     esac
@@ -221,17 +223,27 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
         info "FastQC container already exists"
     fi
 
-    # 4. xHLA container
+    # 4. HLA-HD container
+    log "Pulling HLA-HD container..."
+    if [[ ! -f "${CONTAINER_DIR}/hlahd.sif" ]]; then
+        singularity pull "${CONTAINER_DIR}/hlahd.sif" \
+            docker://humanlongevity/hlahd:latest 2>&1 || \
+            warn "Failed to pull HLA-HD container (may need manual build from hlahd.def)"
+    else
+        info "HLA-HD container already exists"
+    fi
+
+    # 5. xHLA container
     log "Pulling xHLA container..."
     if [[ ! -f "${CONTAINER_DIR}/xhla.sif" ]]; then
         singularity pull "${CONTAINER_DIR}/xhla.sif" \
-            docker://quay.io/biocontainers/xhla:latest 2>&1 || \
+            docker://humanlongevity/hla:latest 2>&1 || \
             warn "Failed to pull xHLA container"
     else
         info "xHLA container already exists"
     fi
 
-    # 5. HLA*LA container
+    # 6. HLA*LA container
     log "Pulling HLA*LA container..."
     if [[ ! -f "${CONTAINER_DIR}/hlala.sif" ]]; then
         singularity pull "${CONTAINER_DIR}/hlala.sif" \
@@ -241,7 +253,7 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
         info "HLA*LA container already exists"
     fi
 
-    # 6. BAMQC container
+    # 7. BAMQC container
     log "Pulling BAMQC container..."
     if [[ ! -f "${CONTAINER_DIR}/bamqc.sif" ]]; then
         singularity pull "${CONTAINER_DIR}/bamqc.sif" \
@@ -251,7 +263,7 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
         info "BAMQC container already exists"
     fi
 
-    # 7. flow-OptiType container
+    # 8. flow-OptiType container
     log "Pulling flow-OptiType container..."
     if [[ ! -f "${CONTAINER_DIR}/flow_optitype.sif" ]]; then
         singularity pull "${CONTAINER_DIR}/flow_optitype.sif" \
@@ -261,7 +273,7 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
         info "flow-OptiType container already exists"
     fi
 
-    # 8. SpecHLA with SpecHap container
+    # 9. SpecHLA with SpecHap container
     log "Building SpecHLA container with SpecHap..."
     if [[ ! -f "${CONTAINER_DIR}/spechla_with_spechap.sif" ]]; then
         SPECHLA_DEF="${INSTALL_DIR}/pipeline/containers/spechla_with_spechap.def"
@@ -329,6 +341,32 @@ REQEOF
         fi
     fi
 
+    # 10. T1K container (new in v1.4.0; needed for calibration with T1K tool)
+    if [[ ! -f "${CONTAINER_DIR}/t1k.sif" ]]; then
+        log "Pulling T1K container (~1.5 GB)..."
+        singularity pull "${CONTAINER_DIR}/t1k.sif" \
+            docker://quay.io/biocontainers/t1k:1.0.9--h5ca1c30_0 2>&1 \
+            && ok "t1k.sif pulled" \
+            || warn "T1K pull failed — only needed for T1K typing and long-read mode"
+    else
+        info "T1K container already exists"
+    fi
+
+    # 11. HiFi-HLA container (new in v1.4.0; optional — PacBio long-read only, ~4 GB)
+    if [[ "${INCLUDE_LONGREADS:-false}" == "true" ]]; then
+        if [[ ! -f "${CONTAINER_DIR}/hifihla.sif" ]]; then
+            log "Pulling HiFi-HLA container (~4 GB)..."
+            singularity pull "${CONTAINER_DIR}/hifihla.sif" \
+                docker://quay.io/pacbio/hifihla:latest 2>&1 \
+                && ok "hifihla.sif pulled" \
+                || warn "HiFi-HLA pull failed — only needed for PacBio HiFi mode"
+        else
+            info "HiFi-HLA container already exists"
+        fi
+    else
+        info "Skipping HiFi-HLA container (pass --include-longreads to install it)"
+    fi
+
     info "Container setup complete"
 fi
 
@@ -358,11 +396,19 @@ params {
     spechla_path     = '/opt/SpecHLA'
     use_local_spechla = false
 
-    // Default tools
-    tools = 'spechla,arcashla'
+    // Default tools (for calibration add: ,optitype)
+    tools = 'hlahd,spechla,arcashla,optitype'
 
     // Reference genome
     reference = 'hg38'
+
+    // Output format: text | gl_string | hml | all
+    output_format     = 'text'
+    allele_db_version = '3.57.0'   // IMGT/HLA release (for HML output)
+    hml_center_id     = 'HLA-PIPELINE'
+
+    // Calibrated weights (set after running submit_calibration_puhti.sh)
+    weights_file      = null
 }
 
 // Include Puhti-specific settings
@@ -372,6 +418,9 @@ includeConfig 'puhti.config'
 process {
     withName: 'SPECHLA|SPECHLA_FASTQ' {
         container = '${CONTAINER_DIR}/spechla_with_spechap.sif'
+    }
+    withName: 'HLAHD|HLAHD_FASTQ' {
+        container = '${CONTAINER_DIR}/hlahd.sif'
     }
     withName: 'ARCASHLA|ARCASHLA_FASTQ' {
         container = '${CONTAINER_DIR}/arcashla.sif'
@@ -524,7 +573,7 @@ else
 fi
 
 # Check containers
-for container in arcashla optitype fastqc xhla hlala bamqc flow_optitype spechla_with_spechap hla_postprocess; do
+for container in arcashla hlahd optitype fastqc xhla hlala bamqc flow_optitype spechla_with_spechap hla_postprocess; do
     if [[ -f "${CONTAINER_DIR}/${container}.sif" ]]; then
         echo -e "${GREEN}[OK]${NC} Container: ${container}.sif"
     else

@@ -39,7 +39,7 @@ process XHLA {
     # Detect reference genome version (hg19 vs hg38) based on chromosome 6 length
     CHR6_LEN=\$(samtools view -H ${bam} | grep "^@SQ.*SN:\${CHR_PREFIX}6" | grep -o "LN:[0-9]*" | cut -d: -f2)
 
-    if [ "\${CHR6_LEN}" -gt "171000000" ]; then
+    if [[ "\${CHR6_LEN}" =~ ^[0-9]+\$ ]] && [ "\${CHR6_LEN}" -gt "171000000" ]; then
         REF_VERSION="hg38"
         # hg38 HLA region
         HLA_REGION="\${CHR_PREFIX}6:28510120-33480577"
@@ -80,9 +80,26 @@ process XHLA {
             # Run alignment
             /opt/bin/align.pl ${sample_id}/${sample_id}.fq.gz ${sample_id}/${sample_id}.tsv 2>&1 || true
 
-            # Run typing (may fail with some datasets)
+            # Run typing with bash-based kill — timeout/SIGTERM ignored by R mclapply.
+            # Run in background, poll every 10s, SIGKILL after 1800s.
             if [ -f "${sample_id}/${sample_id}.tsv" ]; then
-                /opt/bin/typing.r ${sample_id}/${sample_id}.tsv ${sample_id}/${sample_id}.hla 2>&1 || true
+                /opt/bin/typing.r ${sample_id}/${sample_id}.tsv ${sample_id}/${sample_id}.hla \
+                    > ${sample_id}/typing_r.log 2>&1 &
+                TYPING_PID=\$!
+                echo "[typing.r started PID=\${TYPING_PID}]"
+                WAITED=0
+                while [ \${WAITED} -lt 1800 ]; do
+                    kill -0 \${TYPING_PID} 2>/dev/null || { echo "[typing.r finished after \${WAITED}s]"; break; }
+                    sleep 10
+                    WAITED=\$((WAITED + 10))
+                done
+                if kill -0 \${TYPING_PID} 2>/dev/null; then
+                    echo "[Killing typing.r after \${WAITED}s]"
+                    kill -9 \${TYPING_PID} 2>/dev/null || true
+                    # kill mclapply children
+                    kill -9 \$(ps --ppid \${TYPING_PID} -o pid= 2>/dev/null) 2>/dev/null || true
+                fi
+                wait \${TYPING_PID} 2>/dev/null || true
 
                 # Generate report if typing succeeded
                 if [ -f "${sample_id}/${sample_id}.hla" ]; then
@@ -105,18 +122,42 @@ process XHLA {
             --input ${sample_id}/report-${sample_id}-hla.json \
             --output ${sample_id}_xhla.txt
     else
-        # Create empty results file if xHLA failed
-        echo "# xHLA results for ${sample_id}" > ${sample_id}_xhla.txt
-        echo "# xHLA typing failed - insufficient data or incompatible reference" >> ${sample_id}_xhla.txt
-        echo "Gene\tAllele1\tAllele2\tReads1\tReads2" >> ${sample_id}_xhla.txt
-        echo "A\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "B\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "C\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DRB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DQA1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DQB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DPA1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DPB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        # Try to recover allele calls from typing.r stdout (captured before OOM kill)
+        RECOVERED=false
+        if [ -f "${sample_id}/typing_r.log" ] && [ -s "${sample_id}/typing_r.log" ]; then
+            echo "[Attempting allele recovery from typing.r output...]"
+            grep -oE '[A-Z][A-Z0-9]*[*][0-9]+:[0-9]+' "${sample_id}/typing_r.log" | \
+                grep -E '^(A|B|C|DRB1|DQA1|DQB1|DPA1|DPB1)[*]' | \
+                sort -u > ${sample_id}/recovered_alleles.txt || true
+
+            if [ -s "${sample_id}/recovered_alleles.txt" ]; then
+                printf 'Gene\tAllele1\tAllele2\tReads1\tReads2\n' > ${sample_id}_xhla.txt
+                for GENE in A B C DRB1 DQA1 DQB1 DPA1 DPB1; do
+                    A1=\$(grep "^\${GENE}[*]" "${sample_id}/recovered_alleles.txt" | sed -n '1p' || true)
+                    A2=\$(grep "^\${GENE}[*]" "${sample_id}/recovered_alleles.txt" | sed -n '2p' || true)
+                    [ -z "\${A1}" ] && A1="NA" && A2="NA"
+                    [ -z "\${A2}" ] && A2="\${A1}"
+                    printf '%s\t%s\t%s\tNA\tNA\n' "\${GENE}" "\${A1}" "\${A2}"
+                done >> ${sample_id}_xhla.txt
+                RECOVERED=true
+                echo "[Recovered alleles from typing.r output]"
+            fi
+        fi
+
+        if [ "\${RECOVERED}" != "true" ]; then
+            # Create empty results file if xHLA failed completely
+            echo "# xHLA results for ${sample_id}" > ${sample_id}_xhla.txt
+            echo "# xHLA typing failed - insufficient data or incompatible reference" >> ${sample_id}_xhla.txt
+            printf 'Gene\tAllele1\tAllele2\tReads1\tReads2\n' >> ${sample_id}_xhla.txt
+            printf 'A\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'B\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'C\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DRB1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DQA1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DQB1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DPA1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DPB1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+        fi
     fi
 
     # Version info
@@ -173,7 +214,22 @@ process XHLA_FASTQ {
     # Run typing if alignment produced output
     if [ -f "${sample_id}/${sample_id}.tsv" ] && [ -s "${sample_id}/${sample_id}.tsv" ]; then
         echo "[Running xHLA typing...]"
-        /opt/bin/typing.r ${sample_id}/${sample_id}.tsv ${sample_id}/${sample_id}.hla 2>&1 || true
+        /opt/bin/typing.r ${sample_id}/${sample_id}.tsv ${sample_id}/${sample_id}.hla \
+            > ${sample_id}/typing_r.log 2>&1 &
+        TYPING_PID=\$!
+        echo "[typing.r started PID=\${TYPING_PID}]"
+        WAITED=0
+        while [ \${WAITED} -lt 1800 ]; do
+            kill -0 \${TYPING_PID} 2>/dev/null || { echo "[typing.r finished after \${WAITED}s]"; break; }
+            sleep 10
+            WAITED=\$((WAITED + 10))
+        done
+        if kill -0 \${TYPING_PID} 2>/dev/null; then
+            echo "[Killing typing.r after \${WAITED}s]"
+            kill -9 \${TYPING_PID} 2>/dev/null || true
+            kill -9 \$(ps --ppid \${TYPING_PID} -o pid= 2>/dev/null) 2>/dev/null || true
+        fi
+        wait \${TYPING_PID} 2>/dev/null || true
 
         # Generate report if typing succeeded
         if [ -f "${sample_id}/${sample_id}.hla" ]; then
@@ -194,18 +250,42 @@ process XHLA_FASTQ {
             --input ${sample_id}/report-${sample_id}-hla.json \
             --output ${sample_id}_xhla.txt
     else
-        # Create empty results file if xHLA failed
-        echo "# xHLA results for ${sample_id}" > ${sample_id}_xhla.txt
-        echo "# xHLA typing failed - FASTQ input has limited support" >> ${sample_id}_xhla.txt
-        echo "Gene\tAllele1\tAllele2\tReads1\tReads2" >> ${sample_id}_xhla.txt
-        echo "A\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "B\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "C\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DRB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DQA1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DQB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DPA1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
-        echo "DPB1\tNA\tNA\tNA\tNA" >> ${sample_id}_xhla.txt
+        # Try to recover allele calls from typing.r stdout (captured before OOM kill)
+        RECOVERED=false
+        if [ -f "${sample_id}/typing_r.log" ] && [ -s "${sample_id}/typing_r.log" ]; then
+            echo "[Attempting allele recovery from typing.r output...]"
+            grep -oE '[A-Z][A-Z0-9]*[*][0-9]+:[0-9]+' "${sample_id}/typing_r.log" | \
+                grep -E '^(A|B|C|DRB1|DQA1|DQB1|DPA1|DPB1)[*]' | \
+                sort -u > ${sample_id}/recovered_alleles.txt || true
+
+            if [ -s "${sample_id}/recovered_alleles.txt" ]; then
+                printf 'Gene\tAllele1\tAllele2\tReads1\tReads2\n' > ${sample_id}_xhla.txt
+                for GENE in A B C DRB1 DQA1 DQB1 DPA1 DPB1; do
+                    A1=\$(grep "^\${GENE}[*]" "${sample_id}/recovered_alleles.txt" | sed -n '1p' || true)
+                    A2=\$(grep "^\${GENE}[*]" "${sample_id}/recovered_alleles.txt" | sed -n '2p' || true)
+                    [ -z "\${A1}" ] && A1="NA" && A2="NA"
+                    [ -z "\${A2}" ] && A2="\${A1}"
+                    printf '%s\t%s\t%s\tNA\tNA\n' "\${GENE}" "\${A1}" "\${A2}"
+                done >> ${sample_id}_xhla.txt
+                RECOVERED=true
+                echo "[Recovered alleles from typing.r output]"
+            fi
+        fi
+
+        if [ "\${RECOVERED}" != "true" ]; then
+            # Create empty results file if xHLA failed completely
+            echo "# xHLA results for ${sample_id}" > ${sample_id}_xhla.txt
+            echo "# xHLA typing failed - FASTQ input has limited support" >> ${sample_id}_xhla.txt
+            printf 'Gene\tAllele1\tAllele2\tReads1\tReads2\n' >> ${sample_id}_xhla.txt
+            printf 'A\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'B\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'C\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DRB1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DQA1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DQB1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DPA1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+            printf 'DPB1\tNA\tNA\tNA\tNA\n' >> ${sample_id}_xhla.txt
+        fi
     fi
 
     # Cleanup large intermediate files

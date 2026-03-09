@@ -1,0 +1,7 @@
+Tool	Data_type	Superpopulation	N_samples	A	B	C	DRB1	DQB1	Mean_concordance
+arcashla	wgs	EUR	2	0.000	0.000	0.000	0.500	0.000	0.100
+hlahd	wgs	EUR	2	0.500	0.000	0.000	1.000	0.500	0.400
+hlala	wgs	EUR	0	NA	NA	NA	NA	NA	NA
+optitype	wgs	EUR	2	1.000	1.000	0.500	NA	NA	0.833
+spechla	wgs	EUR	2	0.000	0.000	0.000	0.500	0.500	0.200
+xhla	wgs	EUR	0	NA	NA	NA	NA	NA	NA

@@ -162,10 +162,10 @@ process SPECHLA_FASTQ {
     # Create output directory
     mkdir -p ${sample_id}
 
-    # Link or copy FASTQ files to working directory
+    # Link FASTQ files using absolute paths (relative symlinks break after 'cd ${sample_id}')
     if [[ "${fastq1}" == *.gz ]]; then
-        ln -s ${fastq1} ${sample_id}/R1.fastq.gz
-        ln -s ${fastq2} ${sample_id}/R2.fastq.gz
+        ln -s "\$(realpath ${fastq1})" ${sample_id}/R1.fastq.gz
+        ln -s "\$(realpath ${fastq2})" ${sample_id}/R2.fastq.gz
     else
         gzip -c ${fastq1} > ${sample_id}/R1.fastq.gz
         gzip -c ${fastq2} > ${sample_id}/R2.fastq.gz

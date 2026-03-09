@@ -47,10 +47,13 @@ From: python:3.10-slim
         xlrd>=2.0.0 \
         tabulate>=0.8.0 \
         pyyaml>=6.0 \
-        multiqc>=1.14
+        multiqc>=1.14 \
+        plotly>=5.0.0 \
+        kaleido>=0.2.1
 
-    # Verify matplotlib can be imported
+    # Verify matplotlib and plotly can be imported
     python3 -c "import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt; print('Matplotlib OK')"
+    python3 -c "import plotly; print('Plotly OK:', plotly.__version__)"
 
     # Clean up
     apt-get clean
@@ -73,6 +76,7 @@ From: python:3.10-slim
     python3 -c "import matplotlib; print('matplotlib:', matplotlib.__version__)"
     python3 -c "import seaborn; print('seaborn:', seaborn.__version__)"
     python3 -c "import jinja2; print('jinja2:', jinja2.__version__)"
+    python3 -c "import plotly; print('plotly:', plotly.__version__)"
     which samtools && samtools --version | head -1
     which multiqc && multiqc --version
     echo "Container test passed!"
@@ -85,6 +89,7 @@ From: python:3.10-slim
     - matplotlib, seaborn for visualization
     - pandas, numpy for data processing
     - jinja2 for report templating
+    - plotly + kaleido for interactive HTML reports and PNG export
     - MultiQC for quality reports
     - samtools for basic BAM operations
 
