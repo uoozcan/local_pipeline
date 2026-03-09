@@ -67,6 +67,7 @@ SKIP_TYPING=false
 FETCH_ACCESSIONS=false
 CLEANUP_WORK=true       # delete Nextflow work dir after collecting (saves ~10-20 GB/batch)
 USER_GT_FILE=""         # path to user-provided GT CSV (overrides Gourraud 2014 download)
+SPECHLA_SIF=""          # path to existing spechla SIF (optional; default: container_dir/spechla_with_spechap.sif)
 HLA_REGION_HG38="chr6:28000000-34000000"
 HLA_REGION_HG19="6:28000000-34000000"
 
@@ -93,6 +94,10 @@ Options:
                         Columns: sample,A1,A2,B1,B2[,...] (comma-separated, header required).
                         SAMPLE_LIST is built from samples in this file; genes auto-detected
                         from column headers. Ideal for custom/local GT datasets.
+  --spechla-sif PATH    Path to an existing spechla Singularity SIF file.
+                        Skips building/pulling a new one. Useful when the SIF was already
+                        built during a previous pipeline installation.
+                        Default: \${INSTALL_DIR}/containers/spechla_with_spechap.sif
   --skip-typing         Skip Phase 0+1 — run calibration on existing results
   --no-cleanup          Keep Nextflow work dirs after collection (for debugging)
   --fetch-accessions    Download ENA run report for all 1KGP 30x samples, then exit
@@ -117,6 +122,7 @@ while [[ $# -gt 0 ]]; do
         --tools)            TOOLS="$2";             shift 2 ;;
         --genes)            GENES="$2";             shift 2 ;;
         --gt-file)          USER_GT_FILE="$2";      shift 2 ;;
+        --spechla-sif)      SPECHLA_SIF="$2";       shift 2 ;;
         --batch-size)       BATCH_SIZE="$2";        shift 2 ;;
         --no-cleanup)       CLEANUP_WORK=false;     shift ;;
         --skip-typing)      SKIP_TYPING=true;       shift ;;
@@ -667,6 +673,7 @@ nextflow run main.nf \
     --min_read_length 50 \
     --min_tools 1 \
     --install_dir "${INSTALL_DIR}" \
+    ${SPECHLA_SIF:+--spechla_sif "${SPECHLA_SIF}"} \
     -profile singularity \
     -work-dir "\$WORK_DIR" \
     -c "${INSTALL_DIR}/conf/puhti.config" 2>&1
