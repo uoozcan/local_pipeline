@@ -195,17 +195,17 @@ process QC_FASTQ {
         R2_READS=\$(zcat ${fastq2} | awk 'NR%4==1' | wc -l)
 
         # Sample read lengths from first 10000 reads
-        AVG_LENGTH_R1=\$(zcat ${fastq1} | awk 'NR%4==2' | head -10000 | awk '{sum+=length(\$0); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}')
-        AVG_LENGTH_R2=\$(zcat ${fastq2} | awk 'NR%4==2' | head -10000 | awk '{sum+=length(\$0); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}')
+        AVG_LENGTH_R1=\$(zcat ${fastq1} | awk 'NR%4==2 && NR<=40000{sum+=length(\$0); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}')
+        AVG_LENGTH_R2=\$(zcat ${fastq2} | awk 'NR%4==2 && NR<=40000{sum+=length(\$0); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}')
 
         # Sample quality scores
-        AVG_QUAL_R1=\$(zcat ${fastq1} | awk 'NR%4==0' | head -10000 | awk '{for(i=1;i<=length(\$0);i++) sum+=ord(substr(\$0,i,1))-33; count+=length(\$0)} END {if(count>0) printf "%.1f", sum/count; else print "0"}' 2>/dev/null || echo "N/A")
+        AVG_QUAL_R1=\$(zcat ${fastq1} | awk 'NR%4==0 && NR<=40000{for(i=1;i<=length(\$0);i++) sum+=ord(substr(\$0,i,1))-33; count+=length(\$0)} END {if(count>0) printf "%.1f", sum/count; else print "0"}' 2>/dev/null || echo "N/A")
     else
         R1_READS=\$(awk 'NR%4==1' ${fastq1} | wc -l)
         R2_READS=\$(awk 'NR%4==1' ${fastq2} | wc -l)
 
-        AVG_LENGTH_R1=\$(awk 'NR%4==2' ${fastq1} | head -10000 | awk '{sum+=length(\$0); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}')
-        AVG_LENGTH_R2=\$(awk 'NR%4==2' ${fastq2} | head -10000 | awk '{sum+=length(\$0); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}')
+        AVG_LENGTH_R1=\$(awk 'NR%4==2 && NR<=40000{sum+=length(\$0); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}' ${fastq1})
+        AVG_LENGTH_R2=\$(awk 'NR%4==2 && NR<=40000{sum+=length(\$0); count++} END {if(count>0) printf "%.0f", sum/count; else print "0"}' ${fastq2})
     fi
 
     TOTAL_READS=\$((R1_READS + R2_READS))

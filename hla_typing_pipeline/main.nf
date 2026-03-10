@@ -412,8 +412,8 @@ workflow {
             params.min_read_length
         )
 
-        // Use validated FASTQ for downstream
-        ch_input = QC_FASTQ.out.validated_fastq
+        // Use raw FASTQ for HLA typing; QC runs independently for reporting only
+        ch_input = ch_fastq
         ch_qc_reports = ch_qc_reports.mix(QC_FASTQ.out.qc_report)
 
         // Run FastQC on FASTQ files
