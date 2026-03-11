@@ -433,7 +433,7 @@ if [[ "$SKIP_TYPING" != "true" ]]; then
     while IFS= read -r _S; do
         _ALL_DONE=true
         for _T in $(echo "$TOOLS" | tr ',' ' '); do
-            [[ ! -f "${RESULTS_DIR}/${_S}/${_S}_${_T}.txt" ]] && _ALL_DONE=false && break
+            [[ ! -f "${RESULTS_DIR}/${_S}/${_T}/${_S}_${_T}.txt" ]] && _ALL_DONE=false && break
         done
         if [[ "$_ALL_DONE" == "true" ]]; then
             ALREADY_COMPLETE=$(( ALREADY_COMPLETE + 1 ))
@@ -628,7 +628,7 @@ fi
 # Check if all tools already typed for this sample
 ALREADY_DONE=true
 for TOOL in \$(echo "${TOOLS}" | tr ',' ' '); do
-    [[ ! -f "${RESULTS_DIR}/\${SAMPLE_ID}/\${SAMPLE_ID}_\${TOOL}.txt" ]] && ALREADY_DONE=false && break
+    [[ ! -f "${RESULTS_DIR}/\${SAMPLE_ID}/\${TOOL}/\${SAMPLE_ID}_\${TOOL}.txt" ]] && ALREADY_DONE=false && break
 done
 if [[ "\$ALREADY_DONE" == "true" ]]; then
     echo "[SKIP] \$SAMPLE_ID — all tools already typed"
@@ -719,7 +719,7 @@ done
 TOTAL=0
 while IFS= read -r SAMPLE; do
     for TOOL in \$(echo "${TOOLS}" | tr ',' ' '); do
-        SRC="${RESULTS_DIR}/\${SAMPLE}/\${SAMPLE}_\${TOOL}.txt"
+        SRC="${RESULTS_DIR}/\${SAMPLE}/\${TOOL}/\${SAMPLE}_\${TOOL}.txt"
         DST="${RESULTS_DIR}/by_tool/\${TOOL}/\${SAMPLE}_\${TOOL}.txt"
         if [[ -f "\$SRC" ]] && [[ ! -e "\$DST" ]]; then
             ln -sf "\$SRC" "\$DST"
