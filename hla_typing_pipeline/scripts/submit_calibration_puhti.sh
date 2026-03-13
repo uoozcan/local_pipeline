@@ -331,7 +331,7 @@ if [[ "$FETCH_ACCESSIONS" == "true" ]]; then
     python3 - << PYEOF
 import csv, re, os
 
-gt_file = "${GT_FILE}"
+gt_file = "${USER_GT_FILE:-${GT_FILE}}"
 ena_tsv = "${ENA_TSV}"
 out_tsv = "${ACC_FILE}"
 
@@ -340,7 +340,8 @@ if os.path.exists(gt_file):
     with open(gt_file) as f:
         next(f, None)
         for line in f:
-            row = line.strip().split('\t')
+            line_clean = line.strip()
+            row = re.split(r'[\t,]', line_clean, maxsplit=1)
             if row: gt.add(row[0].strip())
 print(f"[INFO] GT samples: {len(gt)}")
 
