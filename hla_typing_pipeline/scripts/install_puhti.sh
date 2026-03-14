@@ -273,36 +273,29 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
         info "flow-OptiType container already exists"
     fi
 
-    # 9. SpecHLA with SpecHap container
-    log "Building SpecHLA container with SpecHap..."
-    if [[ ! -f "${CONTAINER_DIR}/spechla_with_spechap.sif" ]]; then
-        SPECHLA_DEF="${INSTALL_DIR}/pipeline/containers/spechla_with_spechap.def"
-        if [[ -f "$SPECHLA_DEF" ]]; then
-            info "Building from definition file (this may take 15-30 minutes)..."
-            info "If this fails on login node, run in an interactive session:"
-            info "  sinteractive --account=${PROJECT_ID} --mem=16G --time=02:00:00"
+    # 9. SpecHLA — local installation (container fermi2 crashes with SIGABRT on Puhti architecture)
+    SPECHLA_LOCAL="/projappl/${PROJECT_ID}/SpecHLA"
+    log "Installing SpecHLA locally at ${SPECHLA_LOCAL}..."
+    if [[ ! -f "${SPECHLA_LOCAL}/script/whole/SpecHLA.sh" ]]; then
+        # Clone repository
+        git clone --depth 1 https://github.com/deepomicslab/SpecHLA "$SPECHLA_LOCAL" 2>&1 | tee "${INSTALL_DIR}/logs/spechla_clone.log" || {
+            error "Failed to clone SpecHLA. Check internet access on login nodes."
+        }
 
-            singularity build --fakeroot "${CONTAINER_DIR}/spechla_with_spechap.sif" "$SPECHLA_DEF" 2>&1 || {
-                warn "Container build failed with --fakeroot"
-                info "Trying alternative: pulling from registry..."
-                singularity pull "${CONTAINER_DIR}/spechla_with_spechap.sif" \
-                    docker://quay.io/biocontainers/spechla:1.0.7--hdfd78af_3 2>&1 || {
-                    warn "Could not pull pre-built container"
-                    info ""
-                    info "To build SpecHLA container manually:"
-                    info "  1. Start interactive session: sinteractive --account=${PROJECT_ID} --mem=16G"
-                    info "  2. Load modules: module load singularity"
-                    info "  3. Build: singularity build --fakeroot ${CONTAINER_DIR}/spechla_with_spechap.sif $SPECHLA_DEF"
-                    info ""
-                    info "Or copy from local machine:"
-                    info "  scp spechla_with_spechap.sif ${USER}@puhti.csc.fi:${CONTAINER_DIR}/"
-                }
-            }
-        else
-            warn "SpecHLA definition file not found at $SPECHLA_DEF"
+        # Install dependencies via conda
+        if ! command -v conda &>/dev/null; then
+            module load miniconda3 2>/dev/null || module load anaconda3 2>/dev/null || \
+                warn "conda not found — run 'module load miniconda3' and re-run this script"
         fi
+
+        cd "$SPECHLA_LOCAL"
+        bash install.sh 2>&1 | tee "${INSTALL_DIR}/logs/spechla_install.log" || {
+            warn "SpecHLA install.sh reported errors — check ${INSTALL_DIR}/logs/spechla_install.log"
+        }
+        cd -
+        log "SpecHLA installed at ${SPECHLA_LOCAL}"
     else
-        info "SpecHLA container already exists"
+        info "SpecHLA already installed at ${SPECHLA_LOCAL}"
     fi
 
     # 9. Post-processing container with matplotlib
