@@ -607,18 +607,147 @@ def parse_hifihla_results(filepath: str, resolution: str = '2-field') -> Dict[st
     return results
 
 
+def parse_polysolver_results(filepath: str, resolution: str = '2-field') -> Dict[str, List[AlleleCall]]:
+    """
+    Parse POLYSOLVER standard TSV output (produced by parse_polysolver_results.py).
+
+    Format (after conversion):
+        Gene    Allele1    Allele2    Reads1    Reads2
+        A       A*03:01    A*03:01    NA        NA
+    """
+    results = defaultdict(list)
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or line.startswith('Gene') or not line:
+                    continue
+                parts = line.split('\t')
+                if len(parts) < 3:
+                    continue
+                gene = parts[0].strip()
+                if not gene.startswith('HLA-'):
+                    gene = f"HLA-{gene}"
+                seen_alleles: set = set()
+                for allele in parts[1:3]:
+                    allele = allele.strip()
+                    if allele and allele not in ('-', 'NA', 'None'):
+                        normalized = normalize_allele(allele, resolution)
+                        if normalized and normalized not in seen_alleles:
+                            results[gene].append(AlleleCall(
+                                allele=normalized,
+                                reads=0,        # POLYSOLVER does not report read counts
+                                quality=1.0,
+                                tool='polysolver'
+                            ))
+                            seen_alleles.add(normalized)
+    except Exception as e:
+        print(f"Warning: Error parsing POLYSOLVER file {filepath}: {e}", file=sys.stderr)
+    return results
+
+
+def parse_seq2hla_results(filepath: str, resolution: str = '2-field') -> Dict[str, List[AlleleCall]]:
+    """
+    Parse seq2HLA standard TSV output (produced by parse_seq2hla_results.py).
+
+    Format (after conversion):
+        Gene    Allele1      Allele2      Reads1    Reads2
+        A       A*36:01      A*11:02      NA        NA
+        DRB1    DRB1*09:01   DRB1*01:01   NA        NA
+    """
+    results = defaultdict(list)
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or line.startswith('Gene') or not line:
+                    continue
+                parts = line.split('\t')
+                if len(parts) < 3:
+                    continue
+                gene = parts[0].strip()
+                if not gene.startswith('HLA-'):
+                    gene = f"HLA-{gene}"
+                seen_alleles: set = set()
+                for allele in parts[1:3]:
+                    allele = allele.strip()
+                    if allele and allele not in ('-', 'NA', 'None'):
+                        normalized = normalize_allele(allele, resolution)
+                        if normalized and normalized not in seen_alleles:
+                            results[gene].append(AlleleCall(
+                                allele=normalized,
+                                reads=0,        # seq2HLA does not report read counts
+                                quality=1.0,
+                                tool='seq2hla'
+                            ))
+                            seen_alleles.add(normalized)
+    except Exception as e:
+        print(f"Warning: Error parsing seq2HLA file {filepath}: {e}", file=sys.stderr)
+    return results
+
+
+def parse_kourami_results(filepath: str, resolution: str = '2-field') -> Dict[str, List[AlleleCall]]:
+    """
+    Parse Kourami standard TSV output (produced by parse_kourami_results.py).
+
+    Format (after conversion):
+        Gene    Allele1      Allele2      Reads1    Reads2
+        A       A*11:01:01   A*03:01:01   546       532
+
+    Read counts (matched_bases) are available for read_confidence weighting.
+    """
+    results = defaultdict(list)
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or line.startswith('Gene') or not line:
+                    continue
+                parts = line.split('\t')
+                if len(parts) < 3:
+                    continue
+                gene = parts[0].strip()
+                if not gene.startswith('HLA-'):
+                    gene = f"HLA-{gene}"
+                seen_alleles: set = set()
+                for i, allele in enumerate(parts[1:3]):
+                    allele = allele.strip()
+                    if allele and allele not in ('-', 'NA', 'None'):
+                        normalized = normalize_allele(allele, resolution)
+                        if normalized and normalized not in seen_alleles:
+                            reads = 0
+                            if len(parts) > 3 + i:
+                                try:
+                                    reads = int(parts[3 + i])
+                                except (ValueError, IndexError):
+                                    pass
+                            results[gene].append(AlleleCall(
+                                allele=normalized,
+                                reads=reads,
+                                quality=1.0 if reads > 0 else 0.5,
+                                tool='kourami'
+                            ))
+                            seen_alleles.add(normalized)
+    except Exception as e:
+        print(f"Warning: Error parsing Kourami file {filepath}: {e}", file=sys.stderr)
+    return results
+
+
 def parse_results(tool: str, filepath: str, resolution: str = '2-field') -> Dict[str, List[AlleleCall]]:
     """Parse results based on tool type."""
     parsers = {
-        'spechla':  parse_spechla_results,
-        'hlahd':    parse_hlahd_results,
-        'hlala':    parse_hlala_results,
-        'arcashla': parse_arcashla_results,
-        'optitype': parse_optitype_results,
-        'xhla':     parse_xhla_results,
-        'hlascan':  parse_hlascan_results,
-        't1k':      parse_t1k_results,
-        'hifihla':  parse_hifihla_results,
+        'spechla':    parse_spechla_results,
+        'hlahd':      parse_hlahd_results,
+        'hlala':      parse_hlala_results,
+        'arcashla':   parse_arcashla_results,
+        'optitype':   parse_optitype_results,
+        'xhla':       parse_xhla_results,
+        'hlascan':    parse_hlascan_results,
+        't1k':        parse_t1k_results,
+        'hifihla':    parse_hifihla_results,
+        'polysolver': parse_polysolver_results,
+        'seq2hla':    parse_seq2hla_results,
+        'kourami':    parse_kourami_results,
     }
     parser = parsers.get(tool.lower())
     if parser:

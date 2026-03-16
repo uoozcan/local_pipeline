@@ -20,6 +20,8 @@ include { ARCASHLA } from './modules/arcashla'
 include { OPTITYPE } from './modules/optitype'
 include { XHLA } from './modules/xhla'
 include { HLASCAN } from './modules/hlascan'
+include { POLYSOLVER } from './modules/polysolver'
+include { KOURAMI } from './modules/kourami'
 include { BAMQC } from './modules/bamqc'
 
 // Import modules - FASTQ versions
@@ -30,6 +32,7 @@ include { OPTITYPE_FASTQ } from './modules/optitype'
 include { XHLA_FASTQ } from './modules/xhla'
 include { HLASCAN_FASTQ } from './modules/hlascan'
 include { T1K_FASTQ; T1K_LONGREADS } from './modules/t1k'
+include { SEQ2HLA } from './modules/seq2hla'
 include { HIFIHLA } from './modules/hifihla'
 include { BAMQC_FASTQ } from './modules/bamqc'
 
@@ -183,13 +186,16 @@ if (params.input_bam) {
 }
 
 // Tool compatibility map for multi-source mode
-// hlascan: WGS/WES only (requires full genome BAM + hg19); excluded from RNA/targeted
+// hlascan:    WGS/WES only (requires full genome BAM + hg19); excluded from RNA/targeted
+// polysolver: WGS/WES BAM only (hg19-only); excluded from RNA/targeted/long-reads
+// kourami:    WGS/WES BAM only (hg38/hs38NoAltDH); excluded from RNA/targeted/long-reads
+// seq2hla:    RNA-seq only (paired FASTQ; built-in IMGT reference)
 // longreads_hifi: PacBio HiFi BAM  → T1K (long-read mode) + HiFi-HLA (4-field)
 // longreads_ont:  Oxford Nanopore  → T1K (long-read mode)
 def SEQ_TYPE_TOOLS = [
-    'WGS'            : ['spechla', 'hlahd', 'hlala', 'arcashla', 'optitype', 'xhla', 'hlascan', 't1k'],
-    'WES'            : ['spechla', 'hlahd', 'optitype', 'xhla', 'hlascan', 't1k'],
-    'RNAseq'         : ['arcashla', 'optitype', 't1k'],
+    'WGS'            : ['spechla', 'hlahd', 'hlala', 'arcashla', 'optitype', 'xhla', 'hlascan', 't1k', 'polysolver', 'kourami'],
+    'WES'            : ['spechla', 'hlahd', 'optitype', 'xhla', 'hlascan', 't1k', 'polysolver', 'kourami'],
+    'RNAseq'         : ['arcashla', 'optitype', 't1k', 'seq2hla'],
     'targeted'       : ['optitype', 'hlahd'],
     'longreads_hifi' : ['t1k', 'hifihla'],
     'longreads_ont'  : ['t1k'],
@@ -216,6 +222,28 @@ def tools_list = params.tools.tokenize(',')
 if (input_type == 'fastq' && 'hlala' in tools_list) {
     log.warn "HLA*LA (hlala) only supports BAM input. It will be skipped for FASTQ samples."
     tools_list = tools_list.findAll { it != 'hlala' }
+}
+
+// Warn if polysolver/kourami are selected with FASTQ input (BAM-only tools)
+if (input_type == 'fastq' && 'polysolver' in tools_list) {
+    log.warn "POLYSOLVER only supports BAM input. It will be skipped for FASTQ samples."
+    tools_list = tools_list.findAll { it != 'polysolver' }
+}
+if (input_type == 'fastq' && 'kourami' in tools_list) {
+    log.warn "Kourami only supports BAM input. It will be skipped for FASTQ samples."
+    tools_list = tools_list.findAll { it != 'kourami' }
+}
+
+// Warn if POLYSOLVER is used with hg38 (it is hg19-only)
+if ('polysolver' in tools_list && params.reference != 'hg19') {
+    log.warn "POLYSOLVER requires hg19-aligned BAMs (--reference hg19). " +
+             "Results may be empty if the BAM is hg38-aligned."
+}
+
+// Warn if seq2hla is selected for non-RNA data (it is RNA-optimised)
+if ('seq2hla' in tools_list && params.seq_type != 'rna') {
+    log.warn "seq2HLA is optimised for RNA-seq data. " +
+             "For WGS/WES use optitype/hlahd/spechla instead."
 }
 
 // Log parameters
@@ -301,21 +329,26 @@ workflow {
         // ===== BAM INPUT WORKFLOW =====
         ch_bam = create_bam_channel()
 
-        // Run QC on BAM files
-        QC_BAM(
-            ch_bam,
-            params.reference,
-            params.min_hla_reads,
-            params.min_read_length
-        )
+        if (params.skip_qc) {
+            // Skip QC — pass input BAM directly to tools
+            ch_input = ch_bam
+        } else {
+            // Run QC on BAM files
+            QC_BAM(
+                ch_bam,
+                params.reference,
+                params.min_hla_reads,
+                params.min_read_length
+            )
 
-        // Use validated BAM for downstream
-        ch_input = QC_BAM.out.validated_bam
-        ch_qc_reports = ch_qc_reports.mix(QC_BAM.out.qc_report)
+            // Use validated BAM for downstream
+            ch_input = QC_BAM.out.validated_bam
+            ch_qc_reports = ch_qc_reports.mix(QC_BAM.out.qc_report)
 
-        // Run FastQC on BAM files
-        FASTQC_BAM(ch_bam)
-        ch_fastqc = ch_fastqc.mix(FASTQC_BAM.out.zip.map { sample_id, zip -> zip })
+            // Run FastQC on BAM files
+            FASTQC_BAM(ch_bam)
+            ch_fastqc = ch_fastqc.mix(FASTQC_BAM.out.zip.map { sample_id, zip -> zip })
+        }
 
         // Run SpecHLA if requested
         if ('spechla' in tools_list) {
@@ -378,6 +411,22 @@ workflow {
             })
         }
 
+        // Run POLYSOLVER if requested (BAM only; hg19-only; Class I: A, B, C)
+        if ('polysolver' in tools_list) {
+            POLYSOLVER(ch_input)
+            ch_results = ch_results.mix(POLYSOLVER.out.results.map { sample_id, result_file ->
+                [sample_id, 'polysolver', result_file]
+            })
+        }
+
+        // Run Kourami if requested (BAM only; hg38/hs38NoAltDH; Class I: A, B, C)
+        if ('kourami' in tools_list) {
+            KOURAMI(ch_input)
+            ch_results = ch_results.mix(KOURAMI.out.results.map { sample_id, result_file ->
+                [sample_id, 'kourami', result_file]
+            })
+        }
+
         // ── Long-read tools (activated via --seq_type longreads_hifi / longreads_ont) ──
         // Short-read tools above are implicitly skipped because resolveTools() returns
         // only ['t1k', 'hifihla'] or ['t1k'] for these seq_types; the `in tools_list`
@@ -405,20 +454,23 @@ workflow {
         // ===== FASTQ INPUT WORKFLOW =====
         ch_fastq = create_fastq_channel()
 
-        // Run QC on FASTQ files
-        QC_FASTQ(
-            ch_fastq,
-            params.min_hla_reads,
-            params.min_read_length
-        )
+        if (!params.skip_qc) {
+            // Run QC on FASTQ files
+            QC_FASTQ(
+                ch_fastq,
+                params.min_hla_reads,
+                params.min_read_length
+            )
 
-        // Use raw FASTQ for HLA typing; QC runs independently for reporting only
+            ch_qc_reports = ch_qc_reports.mix(QC_FASTQ.out.qc_report)
+
+            // Run FastQC on FASTQ files
+            FASTQC_FASTQ(ch_fastq)
+            ch_fastqc = ch_fastqc.mix(FASTQC_FASTQ.out.zip.map { sample_id, zip -> zip })
+        }
+
+        // Use raw FASTQ for HLA typing
         ch_input = ch_fastq
-        ch_qc_reports = ch_qc_reports.mix(QC_FASTQ.out.qc_report)
-
-        // Run FastQC on FASTQ files
-        FASTQC_FASTQ(ch_fastq)
-        ch_fastqc = ch_fastqc.mix(FASTQC_FASTQ.out.zip.map { sample_id, zip -> zip })
 
         // Run SpecHLA if requested
         if ('spechla' in tools_list) {
@@ -475,6 +527,14 @@ workflow {
             T1K_FASTQ(ch_input)
             ch_results = ch_results.mix(T1K_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 't1k', result_file]
+            })
+        }
+
+        // Run seq2HLA if requested (RNA-seq only; paired FASTQ; Class I + II; built-in reference)
+        if ('seq2hla' in tools_list) {
+            SEQ2HLA(ch_input)
+            ch_results = ch_results.mix(SEQ2HLA.out.results.map { sample_id, result_file ->
+                [sample_id, 'seq2hla', result_file]
             })
         }
 
@@ -619,6 +679,34 @@ workflow {
             ch_results = ch_results.mix(HIFIHLA.out.results.map { sample_id, result_file ->
                 [sample_id, 'hifihla', result_file]
             })
+
+            // POLYSOLVER — WGS, WES BAM (hg19 only; Class I: A, B, C)
+            if ('polysolver' in tools_list) {
+                POLYSOLVER(
+                    ch_ms_bam_validated
+                        .filter { sample_id, bam, seq_type, patient_id ->
+                            'polysolver' in resolveTools(seq_type, tools_list)
+                        }
+                        .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] }
+                )
+                ch_results = ch_results.mix(POLYSOLVER.out.results.map { sample_id, result_file ->
+                    [sample_id, 'polysolver', result_file]
+                })
+            }
+
+            // Kourami — WGS, WES BAM (hg38/hs38NoAltDH; Class I: A, B, C)
+            if ('kourami' in tools_list) {
+                KOURAMI(
+                    ch_ms_bam_validated
+                        .filter { sample_id, bam, seq_type, patient_id ->
+                            'kourami' in resolveTools(seq_type, tools_list)
+                        }
+                        .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] }
+                )
+                ch_results = ch_results.mix(KOURAMI.out.results.map { sample_id, result_file ->
+                    [sample_id, 'kourami', result_file]
+                })
+            }
         }
 
         // ---- FASTQ-based samples (RNAseq, targeted with FASTQ) ----
@@ -712,6 +800,20 @@ workflow {
             ch_results = ch_results.mix(XHLA_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'xhla', result_file]
             })
+
+            // seq2HLA (FASTQ) — RNAseq only; Class I + II; built-in reference
+            if ('seq2hla' in tools_list) {
+                SEQ2HLA(
+                    ch_ms_fastq_validated
+                        .filter { sample_id, fq1, fq2, seq_type, patient_id ->
+                            'seq2hla' in resolveTools(seq_type, tools_list)
+                        }
+                        .map { sample_id, fq1, fq2, seq_type, patient_id -> [sample_id, fq1, fq2] }
+                )
+                ch_results = ch_results.mix(SEQ2HLA.out.results.map { sample_id, result_file ->
+                    [sample_id, 'seq2hla', result_file]
+                })
+            }
         }
     }
 

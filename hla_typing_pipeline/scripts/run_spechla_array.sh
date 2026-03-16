@@ -45,6 +45,21 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
     mkdir -p "$LOGS_DIR" "$WORK_BASE"
     mkdir -p "${RESULTS_DIR}/by_tool/spechla"
 
+    # Remove blank/invalid SpecHLA results so they get re-submitted
+    echo "[INFO] Scanning for blank SpecHLA results to clean up..."
+    CLEANED=0
+    for F in "${RESULTS_DIR}/by_tool/spechla/"*_spechla.txt; do
+        [[ -f "$F" ]] || [[ -L "$F" ]] || continue
+        REAL_F="$(readlink -f "$F" 2>/dev/null || echo "$F")"
+        if ! grep -qP 'HLA[*:]' "$REAL_F" 2>/dev/null; then
+            SAMPLE_C=$(basename "$F" _spechla.txt)
+            rm -f "$F"
+            rm -f "${RESULTS_DIR}/${SAMPLE_C}/spechla/${SAMPLE_C}_spechla.txt"
+            CLEANED=$(( CLEANED + 1 ))
+        fi
+    done
+    echo "[INFO] Removed ${CLEANED} blank/invalid SpecHLA result(s)"
+
     # Collect any existing results from spechla_work/ into the results layout
     echo "[INFO] Collecting existing SpecHLA results from ${WORK_BASE}..."
     COLLECTED=0
@@ -56,7 +71,7 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
         for CANDIDATE in \
             "${SAMPLE_DIR}/${SAMPLE}/hla.result.txt" \
             "${SAMPLE_DIR}/${SAMPLE}/${SAMPLE}/hla.result.txt"; do
-            if [[ -f "$CANDIDATE" ]] && [[ $(wc -l < "$CANDIDATE") -gt 1 ]]; then
+            if [[ -f "$CANDIDATE" ]] && grep -qP 'HLA[*:]' "$CANDIDATE" 2>/dev/null; then
                 RESULT_TXT="$CANDIDATE"
                 break
             fi
@@ -82,9 +97,9 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
             SAMPLE=$(basename "$F")
             RESULT="${RESULTS_DIR}/${SAMPLE}/${TOOL}/${SAMPLE}_${TOOL}.txt"
             [[ -f "$RESULT" ]] || continue
-            # Skip if SpecHLA already done (non-empty result with >1 line)
+            # Skip if SpecHLA already done (has actual allele calls)
             DONE="${RESULTS_DIR}/by_tool/spechla/${SAMPLE}_spechla.txt"
-            if [[ -s "$DONE" ]] && [[ $(wc -l < "$DONE") -gt 1 ]]; then
+            if [[ -s "$DONE" ]] && grep -qP 'HLA[*:]' "$DONE" 2>/dev/null; then
                 continue
             fi
             echo "$SAMPLE"
@@ -259,10 +274,15 @@ fi
 
 echo "[OK] Result: $RESULT_TXT"
 
-# Validate it has allele data (more than just the header)
-NLINES=$(wc -l < "$RESULT_TXT")
-if [[ "$NLINES" -le 1 ]]; then
-    echo "ERROR: hla.result.txt has only ${NLINES} line(s) — no allele calls produced"
+# Preview what SpecHLA wrote (visible in SLURM .out log for diagnostics)
+echo "--- hla.result.txt preview ---"
+head -2 "$RESULT_TXT" 2>/dev/null || echo "(file not found)"
+echo "--- end preview ---"
+
+# Validate it contains actual allele calls (not just header or blank rows)
+if ! grep -qP 'HLA[*:]' "$RESULT_TXT" 2>/dev/null; then
+    echo "ERROR: hla.result.txt has no HLA allele calls — SpecHLA produced a blank/null result"
+    echo "Full file contents:"
     cat "$RESULT_TXT"
     exit 1
 fi

@@ -17,6 +17,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import warnings
 from datetime import datetime
@@ -69,6 +70,21 @@ FIGSIZE_RANK  = (10, 5)
 FIGSIZE_POP   = (16, 6)
 FIGSIZE_STACK = (12, 6)
 FIGSIZE_STRAT = (13, 6)
+FIGSIZE_BOX   = (11, 5)
+
+# Mapping from Nextflow process name → short tool key (for resource plots)
+PROCESS_TO_TOOL = {
+    "HLAHD":          "hlahd",
+    "HLAHD_FASTQ":    "hlahd",
+    "SPECHLA":        "spechla",
+    "SPECHLA_FASTQ":  "spechla",
+    "ARCASHLA":       "arcashla",
+    "ARCASHLA_FASTQ": "arcashla",
+    "OPTITYPE":       "optitype",
+    "OPTITYPE_FASTQ": "optitype",
+    "XHLA":           "xhla",
+    "XHLA_FASTQ":     "xhla",
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -493,13 +509,277 @@ def plot_strategy(strat_df, out_dir, run_title):
     save(fig, out_dir / "06_strategy_comparison.png", title)
 
 # ---------------------------------------------------------------------------
+# Trace file parsing (resource usage)
+# ---------------------------------------------------------------------------
+
+def _parse_duration(s):
+    """Convert Nextflow duration string to seconds. e.g. '8m 19s' → 499.0"""
+    if not s or s.strip() in ("-", ""):
+        return 0.0
+    total = 0.0
+    for val, unit in re.findall(r"([\d.]+)\s*(d|h|m|s|ms|us)", s):
+        v = float(val)
+        if unit == "d":   total += v * 86400
+        elif unit == "h": total += v * 3600
+        elif unit == "m": total += v * 60
+        elif unit == "s": total += v
+        elif unit == "ms": total += v / 1000
+        elif unit == "us": total += v / 1_000_000
+    return total
+
+
+def _parse_memory(s):
+    """Convert Nextflow memory string to GB. e.g. '2.6 GB' → 2.6"""
+    if not s or s.strip() in ("-", ""):
+        return 0.0
+    m = re.match(r"([\d.]+)\s*(B|KB|MB|GB|TB)", s.strip(), re.IGNORECASE)
+    if not m:
+        return 0.0
+    val, unit = float(m.group(1)), m.group(2).upper()
+    return {"B": val/1e9, "KB": val/1e6, "MB": val/1e3, "GB": val, "TB": val*1e3}.get(unit, 0.0)
+
+
+def _parse_cpu(s):
+    """Parse CPU percentage. e.g. '659.0%' → 659.0"""
+    if not s or s.strip() in ("-", ""):
+        return 0.0
+    return float(s.strip().rstrip("%"))
+
+
+def load_traces(trace_dir):
+    """
+    Load all trace_*.txt files from *trace_dir*, keep only COMPLETED
+    HLA typing process rows.  Returns list of dicts with keys:
+        tool, realtime_s, peak_rss_gb, cpu_pct, sample
+    """
+    trace_dir = Path(trace_dir)
+    trace_files = sorted(trace_dir.glob("trace_*.txt"))
+    if not trace_files:
+        # Also try plain trace.txt
+        trace_files = sorted(trace_dir.glob("trace*.txt"))
+    if not trace_files:
+        print(f"  [WARN] No trace_*.txt files found in {trace_dir}")
+        return []
+
+    records = []
+    for tf in trace_files:
+        try:
+            with open(tf) as fh:
+                header = fh.readline().strip()
+                sep = "\t" if "\t" in header else None
+                cols = header.split("\t") if sep else re.split(r"\s{2,}", header)
+                cols = [c.strip() for c in cols]
+                idx = {c: i for i, c in enumerate(cols)}
+
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split("\t") if sep else re.split(r"\s{2,}", line)
+                    parts = [p.strip() for p in parts]
+
+                    def _get(col, default=""):
+                        i = idx.get(col, -1)
+                        return parts[i] if 0 <= i < len(parts) else default
+
+                    status = _get("status")
+                    if status.lower() not in ("completed", "ok", "cached"):
+                        continue
+
+                    name_field = _get("name", "")
+                    process = name_field.split(" ")[0].split(":")[0].upper()
+                    tool = PROCESS_TO_TOOL.get(process)
+                    if tool is None:
+                        continue
+
+                    # Sample name from parentheses: "HLAHD_FASTQ (NA18526)"
+                    sm = re.search(r"\(([^)]+)\)", name_field)
+                    sample = sm.group(1) if sm else ""
+
+                    realtime_s = _parse_duration(_get("realtime"))
+                    peak_rss_gb = _parse_memory(_get("peak_rss"))
+                    cpu_pct = _parse_cpu(_get("%cpu"))
+
+                    if realtime_s > 0:
+                        records.append({
+                            "tool":        tool,
+                            "sample":      sample,
+                            "realtime_s":  realtime_s,
+                            "peak_rss_gb": peak_rss_gb,
+                            "cpu_pct":     cpu_pct,
+                        })
+        except Exception as e:
+            print(f"  [WARN] Could not parse {tf.name}: {e}")
+
+    print(f"  Loaded {len(records)} completed typing task records from {len(trace_files)} trace file(s)")
+    return records
+
+
+def _boxplot_h(ax, data_by_tool, metric_fn, tools_sorted, color_fn):
+    """Draw horizontal boxplot with overlaid jittered points."""
+    vals = [metric_fn(data_by_tool[t]) for t in tools_sorted]
+    rng = np.random.default_rng(42)
+
+    bp = ax.boxplot(
+        vals,
+        vert=False,
+        patch_artist=True,
+        widths=0.5,
+        flierprops=dict(marker="", linestyle="none"),
+        medianprops=dict(color="white", linewidth=2),
+        whiskerprops=dict(color="#555", linewidth=1),
+        capprops=dict(color="#555", linewidth=1),
+        boxprops=dict(linewidth=0.5),
+    )
+    for patch, tool in zip(bp["boxes"], tools_sorted):
+        patch.set_facecolor(color_fn(tool))
+        patch.set_alpha(0.75)
+
+    # Jitter overlay
+    for i, (tool, v) in enumerate(zip(tools_sorted, vals), start=1):
+        if not v:
+            continue
+        jitter = rng.normal(0, 0.08, len(v))
+        ax.scatter(v, [i + j for j in jitter],
+                   color=color_fn(tool), alpha=0.6, s=18, zorder=5,
+                   edgecolors="white", linewidths=0.3)
+        # Median annotation
+        med = np.median(v)
+        ax.text(med, i + 0.38, f"{med:.1f}", ha="center", va="bottom",
+                fontsize=7.5, color="#222")
+
+    ax.set_yticks(range(1, len(tools_sorted) + 1))
+    ax.set_yticklabels([tool_label(t) for t in tools_sorted], fontsize=10)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(axis="x", alpha=0.3, linestyle="--")
+
+
+# ---------------------------------------------------------------------------
+# Plot 7 — Tool runtime distribution
+# ---------------------------------------------------------------------------
+def plot_resource_runtime(records, out_dir, run_title):
+    if not records:
+        print("  [SKIP] No trace data — skipping Plot 7")
+        return
+
+    from collections import defaultdict
+    by_tool = defaultdict(list)
+    for r in records:
+        if r["realtime_s"] > 0:
+            by_tool[r["tool"]].append(r["realtime_s"] / 60.0)  # → minutes
+
+    tools = sorted(by_tool, key=lambda t: np.median(by_tool[t]), reverse=True)
+    if not tools:
+        print("  [SKIP] No runtime data")
+        return
+
+    n_total = sum(len(by_tool[t]) for t in tools)
+    fig, ax = plt.subplots(figsize=FIGSIZE_BOX)
+    _boxplot_h(ax, by_tool, lambda v: v, tools, tool_color)
+
+    # N label per tool
+    for i, t in enumerate(tools, start=1):
+        n = len(by_tool[t])
+        ax.text(ax.get_xlim()[1] * 0.97, i, f"n={n}",
+                va="center", ha="right", fontsize=8, color="#555")
+
+    # Log scale if range > 10×
+    all_vals = [v for t in tools for v in by_tool[t]]
+    if max(all_vals) / max(min(all_vals), 0.01) > 10:
+        ax.set_xscale("log")
+        ax.set_xlabel("Runtime (minutes, log scale)", fontsize=10)
+    else:
+        ax.set_xlabel("Runtime (minutes)", fontsize=10)
+
+    title = f"HLA Typing Tool Runtime Distribution (N={n_total} tasks)"
+    if run_title:
+        title = f"{run_title} — {title}"
+    save(fig, out_dir / "07_tool_runtime.png", title)
+
+
+# ---------------------------------------------------------------------------
+# Plot 8 — Peak RAM distribution
+# ---------------------------------------------------------------------------
+def plot_resource_ram(records, out_dir, run_title, system_ram_gb=32.0):
+    if not records:
+        print("  [SKIP] No trace data — skipping Plot 8")
+        return
+
+    from collections import defaultdict
+    by_tool = defaultdict(list)
+    for r in records:
+        if r["peak_rss_gb"] > 0:
+            by_tool[r["tool"]].append(r["peak_rss_gb"])
+
+    tools = sorted(by_tool, key=lambda t: np.median(by_tool[t]), reverse=True)
+    if not tools:
+        print("  [SKIP] No RAM data")
+        return
+
+    fig, ax = plt.subplots(figsize=FIGSIZE_BOX)
+    _boxplot_h(ax, by_tool, lambda v: v, tools, tool_color)
+
+    if system_ram_gb and system_ram_gb > 0:
+        ax.axvline(system_ram_gb, color="#E63946", linestyle="--", linewidth=1.5,
+                   alpha=0.7, label=f"Node RAM ({system_ram_gb:.0f} GB)")
+        ax.legend(fontsize=9, loc="lower right")
+
+    ax.set_xlabel("Peak RSS (GB)", fontsize=10)
+
+    n_total = sum(len(by_tool[t]) for t in tools)
+    title = f"Peak RAM Usage per HLA Typing Tool (N={n_total} tasks)"
+    if run_title:
+        title = f"{run_title} — {title}"
+    save(fig, out_dir / "08_tool_ram.png", title)
+
+
+# ---------------------------------------------------------------------------
+# Plot 9 — CPU utilisation distribution
+# ---------------------------------------------------------------------------
+def plot_resource_cpu(records, out_dir, run_title):
+    if not records:
+        print("  [SKIP] No trace data — skipping Plot 9")
+        return
+
+    from collections import defaultdict
+    by_tool = defaultdict(list)
+    for r in records:
+        if r["cpu_pct"] > 0:
+            by_tool[r["tool"]].append(r["cpu_pct"])
+
+    tools = sorted(by_tool, key=lambda t: np.median(by_tool[t]), reverse=True)
+    if not tools:
+        print("  [SKIP] No CPU data")
+        return
+
+    fig, ax = plt.subplots(figsize=FIGSIZE_BOX)
+    _boxplot_h(ax, by_tool, lambda v: v, tools, tool_color)
+
+    # Reference lines at common core multiples
+    xmax = max(v for t in tools for v in by_tool[t]) * 1.1
+    for pct, label in [(100, "1 core"), (200, "2"), (400, "4"), (800, "8")]:
+        if pct < xmax:
+            ax.axvline(pct, color="grey", linestyle=":", linewidth=0.8, alpha=0.6)
+            ax.text(pct + 2, len(tools) + 0.5, label, fontsize=7.5, color="grey", va="top")
+
+    ax.set_xlabel("CPU Usage (%)", fontsize=10)
+
+    n_total = sum(len(by_tool[t]) for t in tools)
+    title = f"CPU Utilisation per HLA Typing Tool (N={n_total} tasks)"
+    if run_title:
+        title = f"{run_title} — {title}"
+    save(fig, out_dir / "09_tool_cpu.png", title)
+
+
+# ---------------------------------------------------------------------------
 # HTML report
 # ---------------------------------------------------------------------------
 def _b64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
-def write_html(out_dir, acc_df, weights_data, run_title, plots_made):
+def write_html(out_dir, acc_df, weights_data, run_title, plots_made, trace_records=None):
     captions = {
         "01_concordance_heatmap.png":
             "Tool concordance rates across HLA genes. Color intensity indicates 2-field "
@@ -519,6 +799,15 @@ def write_html(out_dir, acc_df, weights_data, run_title, plots_made):
         "06_strategy_comparison.png":
             "Comparison of three voting strategies. Asterisk (*) marks genes where the "
             "calibrated strategy is significantly better (Wilcoxon p < 0.05).",
+        "07_tool_runtime.png":
+            "Wall-clock runtime per HLA typing tool from Nextflow trace files. "
+            "Box shows IQR; whiskers extend to 1.5×IQR; circles are individual sample runs.",
+        "08_tool_ram.png":
+            "Peak RSS memory usage per HLA typing tool. "
+            "Red dashed line indicates available node RAM.",
+        "09_tool_cpu.png":
+            "CPU utilisation per tool (%). Values >100% indicate multi-core parallelism. "
+            "Grey dotted lines mark 1-, 2-, 4-, 8-core reference levels.",
     }
 
     genes = _gene_cols(acc_df)
@@ -585,7 +874,7 @@ def write_html(out_dir, acc_df, weights_data, run_title, plots_made):
         </table>
         """
 
-    # Images
+    # Accuracy / weights images (plots 01-06)
     imgs_html = ""
     for fname in [
         "01_concordance_heatmap.png", "02_concordance_bars.png",
@@ -602,6 +891,62 @@ def write_html(out_dir, acc_df, weights_data, run_title, plots_made):
           <img src="data:image/png;base64,{b64}" alt="{fname}" />
           <p class="cap">{cap}</p>
         </div>
+        """
+
+    # Resource usage images (plots 07-09) + summary table
+    resource_html = ""
+    resource_fnames = ["07_tool_runtime.png", "08_tool_ram.png", "09_tool_cpu.png"]
+    resource_plots = [f for f in resource_fnames if (out_dir / f).exists()]
+    if resource_plots:
+        res_imgs = ""
+        for fname in resource_plots:
+            cap = captions.get(fname, "")
+            b64 = _b64(out_dir / fname)
+            res_imgs += f"""
+            <div class="fig">
+              <img src="data:image/png;base64,{b64}" alt="{fname}" />
+              <p class="cap">{cap}</p>
+            </div>
+            """
+
+        # Summary table from trace_records
+        res_tbl = ""
+        if trace_records:
+            from collections import defaultdict
+            by_tool = defaultdict(list)
+            for r in trace_records:
+                by_tool[r["tool"]].append(r)
+            tbl_rows2 = []
+            for tool in sorted(by_tool):
+                recs = by_tool[tool]
+                runtimes = [r["realtime_s"] / 60 for r in recs if r["realtime_s"] > 0]
+                rams = [r["peak_rss_gb"] for r in recs if r["peak_rss_gb"] > 0]
+                cpus = [r["cpu_pct"] for r in recs if r["cpu_pct"] > 0]
+                row_cells = (
+                    f"<td><b>{tool_label(tool)}</b></td>"
+                    f"<td style='text-align:center'>{len(recs)}</td>"
+                    f"<td style='text-align:center'>{np.median(runtimes):.1f} min</td>"
+                    f"<td style='text-align:center'>{np.median(rams):.2f} GB</td>"
+                    f"<td style='text-align:center'>{np.median(cpus):.0f}%</td>"
+                )
+                tbl_rows2.append(f"<tr>{row_cells}</tr>")
+            res_tbl = f"""
+            <h3>Resource Usage Summary (median per tool)</h3>
+            <table class="tbl">
+              <thead><tr>
+                <th>Tool</th><th>N tasks</th>
+                <th>Median Runtime</th><th>Median Peak RAM</th><th>Median CPU</th>
+              </tr></thead>
+              <tbody>{''.join(tbl_rows2)}</tbody>
+            </table>
+            """
+
+        resource_html = f"""
+        <h2>Resource Usage</h2>
+        <p>CPU, RAM, and runtime metrics extracted from Nextflow trace files
+           (COMPLETED tasks only).</p>
+        {res_tbl}
+        {res_imgs}
         """
 
     html = f"""<!DOCTYPE html>
@@ -654,6 +999,8 @@ def write_html(out_dir, acc_df, weights_data, run_title, plots_made):
 <h2>Figures</h2>
 {imgs_html}
 
+{resource_html}
+
 <hr/>
 <p style="font-size:11px;color:#999">
   Generated by plot_calibration_results.py — HLA Typing Pipeline v1.4
@@ -678,6 +1025,10 @@ def main():
                     help="Path to strategy_comparison_calibrated.tsv (optional)")
     ap.add_argument("--title",          default=None,
                     help="Optional run title for plot suptitles")
+    ap.add_argument("--trace-dir",      default=None,
+                    help="Directory containing Nextflow trace_*.txt files for resource plots")
+    ap.add_argument("--system-ram",     type=float, default=32.0,
+                    help="Available node RAM in GB for reference line in RAM plot (default: 32)")
     args = ap.parse_args()
 
     conf_dir = Path(args.conf_dir)
@@ -721,8 +1072,26 @@ def main():
     plot_strategy(strat_df, out_dir, run_title)
     plots_made.append("06_strategy_comparison.png")
 
+    # Resource usage plots (optional)
+    trace_records = []
+    if args.trace_dir:
+        print("Loading trace files...")
+        trace_records = load_traces(args.trace_dir)
+        if trace_records:
+            print("  Plot 7: Tool runtime distribution")
+            plot_resource_runtime(trace_records, out_dir, run_title)
+            plots_made.append("07_tool_runtime.png")
+
+            print("  Plot 8: Peak RAM distribution")
+            plot_resource_ram(trace_records, out_dir, run_title, args.system_ram)
+            plots_made.append("08_tool_ram.png")
+
+            print("  Plot 9: CPU utilisation distribution")
+            plot_resource_cpu(trace_records, out_dir, run_title)
+            plots_made.append("09_tool_cpu.png")
+
     print("  HTML report")
-    write_html(out_dir, acc_df, weights_data, run_title, plots_made)
+    write_html(out_dir, acc_df, weights_data, run_title, plots_made, trace_records)
 
     print(f"\nDone. Output in: {out_dir}")
     print(f"  Open: {out_dir / 'calibration_report.html'}")
