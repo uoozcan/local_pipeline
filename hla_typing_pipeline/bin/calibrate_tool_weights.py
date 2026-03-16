@@ -72,7 +72,10 @@ from consensus_voting import (
     parse_hifihla_results,
     parse_hlahd_results,
     parse_hlala_results,
+    parse_kourami_results,
     parse_optitype_results,
+    parse_polysolver_results,
+    parse_seq2hla_results,
     parse_spechla_results,
     parse_t1k_results,
     parse_xhla_results,
@@ -97,9 +100,12 @@ TOOL_GENE_COVERAGE: Dict[str, Set[str]] = {
     'arcashla': set(CLASSICAL_GENES),
     'hlala':    {'A', 'B', 'C', 'DRB1', 'DQA1', 'DQB1', 'DPA1', 'DPB1'},
     'optitype': {'A', 'B', 'C'},
-    'xhla':     {'A', 'B', 'C', 'DRB1', 'DQB1', 'DPB1'},   # no DQA1/DPA1
-    't1k':      set(CLASSICAL_GENES),                        # full Class I + II
-    'hifihla':  set(CLASSICAL_GENES),                        # long-read, 4-field
+    'xhla':      {'A', 'B', 'C', 'DRB1', 'DQB1', 'DPB1'},    # no DQA1/DPA1
+    't1k':       set(CLASSICAL_GENES),                        # full Class I + II
+    'hifihla':   set(CLASSICAL_GENES),                        # long-read, 4-field
+    'seq2hla':   set(CLASSICAL_GENES),                        # RNA-seq Class I + II
+    'kourami':   {'A', 'B', 'C', 'DRB1'},                    # assembly-graph; DRB1 partial
+    'polysolver': {'A', 'B', 'C'},                            # Class I only
 }
 
 # Parser dispatch (mirrors consensus_voting.py)
@@ -110,8 +116,11 @@ TOOL_PARSERS = {
     'optitype': parse_optitype_results,
     'hlala':    parse_hlala_results,
     'xhla':     parse_xhla_results,
-    't1k':      parse_t1k_results,
-    'hifihla':  parse_hifihla_results,
+    't1k':       parse_t1k_results,
+    'hifihla':   parse_hifihla_results,
+    'seq2hla':   parse_seq2hla_results,
+    'kourami':   parse_kourami_results,
+    'polysolver': parse_polysolver_results,
 }
 
 # 1KGP integrated call set panel (sample → population → superpopulation)
