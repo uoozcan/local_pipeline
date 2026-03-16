@@ -45,6 +45,34 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
     mkdir -p "$LOGS_DIR" "$WORK_BASE"
     mkdir -p "${RESULTS_DIR}/by_tool/spechla"
 
+    # Collect any existing results from spechla_work/ into the results layout
+    echo "[INFO] Collecting existing SpecHLA results from ${WORK_BASE}..."
+    COLLECTED=0
+    for SAMPLE_DIR in "${WORK_BASE}"/*/; do
+        [[ -d "$SAMPLE_DIR" ]] || continue
+        SAMPLE=$(basename "$SAMPLE_DIR")
+        # Find hla.result.txt — SpecHLA may nest it one or two levels deep
+        RESULT_TXT=""
+        for CANDIDATE in \
+            "${SAMPLE_DIR}/${SAMPLE}/hla.result.txt" \
+            "${SAMPLE_DIR}/${SAMPLE}/${SAMPLE}/hla.result.txt"; do
+            if [[ -f "$CANDIDATE" ]] && [[ $(wc -l < "$CANDIDATE") -gt 1 ]]; then
+                RESULT_TXT="$CANDIDATE"
+                break
+            fi
+        done
+        [[ -z "$RESULT_TXT" ]] && continue
+        # Publish to results layout
+        mkdir -p "${RESULTS_DIR}/${SAMPLE}/spechla"
+        cp "$RESULT_TXT" "${RESULTS_DIR}/${SAMPLE}/spechla/${SAMPLE}_spechla.txt"
+        # Symlink to by_tool
+        DST="${RESULTS_DIR}/by_tool/spechla/${SAMPLE}_spechla.txt"
+        [[ -e "$DST" ]] && rm -f "$DST"
+        ln -sf "${RESULTS_DIR}/${SAMPLE}/spechla/${SAMPLE}_spechla.txt" "$DST"
+        COLLECTED=$(( COLLECTED + 1 ))
+    done
+    echo "[INFO] Collected ${COLLECTED} existing SpecHLA results from spechla_work/"
+
     # Discover samples typed by any other tool
     SAMPLE_LIST_FILE="${BASE}/conf/spechla_pending.txt"
     : > "$SAMPLE_LIST_FILE"
