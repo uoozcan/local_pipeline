@@ -144,6 +144,7 @@ fi
 # Auto-detect install directory (try projappl first, then common scratch paths)
 if [[ -z "$INSTALL_DIR" ]]; then
     for _candidate in \
+        "/scratch/${PROJECT_ID}/${USER}/new_pipeline/hla_typing_pipeline" \
         "/projappl/${PROJECT_ID}/hla_typing" \
         "/projappl/${PROJECT_ID}/hla_typing_pipeline" \
         "/scratch/${PROJECT_ID}/${USER}/hla_typing_pipeline" \
@@ -208,37 +209,45 @@ echo ""
 # Build sample list — either from user-provided GT CSV or default 50-sample list
 #-----------------------------------------------------------------------------
 if [[ -n "$USER_GT_FILE" ]]; then
-    # Extract sample IDs from first column of provided GT CSV (skip header)
-    python3 - << PYEOF
-import csv, sys
-with open('${GT_FILE}') as f:
-    for i, row in enumerate(csv.reader(f)):
-        if i == 0:
-            continue  # skip header
-        s = row[0].strip()
-        if s:
-            print(s)
-PYEOF
-    # Redirect output to SAMPLE_LIST
+    # Extract sample IDs from GT file — detect sample column by header name
+    # Supports: col 0 = sample (old format), or 'Sample ID' at any column (new 2018 format)
     python3 -c "
 import csv
+_SAMPLE_HEADERS = {'sample', 'sample id', 'sample_id', 'individual', 'individual id'}
+with open('${GT_FILE}') as f:
+    first_line = f.readline()
+sep = '\t' if '\t' in first_line else ','
 rows = []
 with open('${GT_FILE}') as f:
-    for i, row in enumerate(csv.reader(f)):
-        if i == 0: continue
-        s = row[0].strip()
-        if s: rows.append(s)
+    rdr = csv.reader(f, delimiter=sep)
+    hdr = [c.strip().lower() for c in next(rdr)]
+    sample_col = next((i for i, h in enumerate(hdr) if h in _SAMPLE_HEADERS), 0)
+    for row in rdr:
+        s = row[sample_col].strip() if sample_col < len(row) else ''
+        if s:
+            rows.append(s)
 with open('${SAMPLE_LIST}', 'w') as out:
     out.write('\n'.join(rows) + '\n')
 "
-    # Auto-detect genes from CSV header columns (e.g. A1,A2,B1,B2 → A,B)
+    # Auto-detect genes from GT file header
+    # Supports: A_1/DRB1_2, A1/B2, and HLA-A 1/HLA-DQB1 2 column naming styles
     GENES=$(python3 -c "
 import csv, re
+_SAMPLE_HEADERS = {'sample', 'sample id', 'sample_id', 'individual', 'individual id'}
 with open('${GT_FILE}') as f:
-    header = next(csv.reader(f))
+    first_line = f.readline()
+sep = '\t' if '\t' in first_line else ','
+with open('${GT_FILE}') as f:
+    rdr = csv.reader(f, delimiter=sep)
+    header = next(rdr)
 seen, genes = set(), []
-for col in header[1:]:
-    m = re.match(r'^(DRB1|DQA1|DQB1|DPA1|DPB1|[A-Z])[_\d]', col.strip())
+for col in header:
+    col = col.strip()
+    if col.lower() in _SAMPLE_HEADERS:
+        continue
+    m = re.match(r'^(DRB1|DQA1|DQB1|DPA1|DPB1|[A-Z])[_\d]', col)
+    if not m:
+        m = re.match(r'^HLA-([A-Z][A-Z0-9]*)\s+\d', col)
     if m and m.group(1) not in seen:
         genes.append(m.group(1)); seen.add(m.group(1))
 print(','.join(genes))
@@ -397,30 +406,38 @@ else
     echo "[INFO] Using hardcoded 7-sample fallback (run --fetch-accessions for full 50+)"
 fi
 
-# Rebuild SAMPLE_LIST to only include GT-confirmed samples (present in CRAM_ERR)
-# This ensures ACTUAL_N reflects real typing workload and avoids empty array tasks.
-GT_CONFIRMED_LIST="${SCRATCH_BASE}/conf/1kgp_gt_confirmed_samples.txt"
-: > "$GT_CONFIRMED_LIST"
-while IFS= read -r S; do
-    [[ -n "${CRAM_ERR[$S]:-}" ]] && echo "$S" >> "$GT_CONFIRMED_LIST"
-done < "$SAMPLE_LIST"
+if [[ "$SKIP_TYPING" != "true" ]]; then
+    # Rebuild SAMPLE_LIST to only include GT-confirmed samples (present in CRAM_ERR)
+    # This ensures ACTUAL_N reflects real typing workload and avoids empty array tasks.
+    GT_CONFIRMED_LIST="${SCRATCH_BASE}/conf/1kgp_gt_confirmed_samples.txt"
+    : > "$GT_CONFIRMED_LIST"
+    while IFS= read -r S; do
+        [[ -n "${CRAM_ERR[$S]:-}" ]] && echo "$S" >> "$GT_CONFIRMED_LIST"
+    done < "$SAMPLE_LIST"
 
-GT_N=$(wc -l < "$GT_CONFIRMED_LIST")
-CANDIDATE_N=$ACTUAL_N
-SKIPPED=$(( CANDIDATE_N - GT_N ))
+    GT_N=$(wc -l < "$GT_CONFIRMED_LIST")
+    CANDIDATE_N=$ACTUAL_N
+    SKIPPED=$(( CANDIDATE_N - GT_N ))
 
-if [[ $SKIPPED -gt 0 ]]; then
-    echo "[INFO] $SKIPPED candidate sample(s) have no 30x accession with ground truth — excluded"
-fi
-echo "[INFO] GT-confirmed samples to type: ${GT_N} / ${CANDIDATE_N}"
+    if [[ $SKIPPED -gt 0 ]]; then
+        echo "[INFO] $SKIPPED candidate sample(s) have no 30x accession with ground truth — excluded"
+    fi
+    echo "[INFO] GT-confirmed samples to type: ${GT_N} / ${CANDIDATE_N}"
 
-cp "$GT_CONFIRMED_LIST" "$SAMPLE_LIST"
-ACTUAL_N=$GT_N
+    cp "$GT_CONFIRMED_LIST" "$SAMPLE_LIST"
+    ACTUAL_N=$GT_N
 
-if [[ $ACTUAL_N -eq 0 ]]; then
-    echo "[ERROR] No GT-confirmed samples found."
-    echo "        Run --fetch-accessions first to populate the accession table, then retry."
-    exit 1
+    if [[ $ACTUAL_N -eq 0 ]]; then
+        echo "[ERROR] No GT-confirmed samples found."
+        echo "        Run --fetch-accessions first to populate the accession table, then retry."
+        exit 1
+    fi
+else
+    # --skip-typing: typing is already done; skip accession filtering entirely.
+    # calibrate_tool_weights.py will match only the samples already in by_tool/.
+    GT_N=$(wc -l < "$SAMPLE_LIST")
+    echo "[INFO] --skip-typing: skipping accession filter; ${GT_N} GT samples will be matched against existing by_tool/ results"
+    ACTUAL_N=$GT_N
 fi
 
 #-----------------------------------------------------------------------------

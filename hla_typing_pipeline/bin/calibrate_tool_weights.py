@@ -243,6 +243,8 @@ def load_ground_truth(filepath: str, resolution: str = '2-field') -> Dict[str, D
     gt: Dict[str, Dict[str, List[str]]] = {}
     conflicts: List[str] = []
 
+    sample_col_idx: int = 0  # which column holds the sample ID (usually 0)
+
     with open(filepath, 'r') as f:
         header: Optional[List[str]] = None
         col_map: Dict[int, str] = {}   # col_index → gene_short
@@ -251,25 +253,59 @@ def load_ground_truth(filepath: str, resolution: str = '2-field') -> Dict[str, D
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
-            parts = [p.strip() for p in line.split(sep)]
+            if sep == '__shlex__':
+                parts = shlex.split(line)
+            else:
+                parts = [p.strip() for p in line.split(sep)]
 
             if header is None:
                 header = parts
-                # Build col_map: parse both 'A_1'/'DRB1_2' and 'A1'/'B2'/'C1' style
-                for idx, col in enumerate(header[1:], start=1):
+                # Find sample column (may be 'Sample', 'Sample ID', column 0, etc.)
+                _SAMPLE_HEADER_NAMES = {'sample', 'sample id', 'sample_id',
+                                        'individual', 'individual id', 'individualid'}
+                for _i, _col in enumerate(header):
+                    if _col.strip().lower() in _SAMPLE_HEADER_NAMES:
+                        sample_col_idx = _i
+                        break
+
+                # Build col_map: scan all columns, skip the sample column
+                for idx, col in enumerate(header):
+                    if idx == sample_col_idx:
+                        continue
+                    col = col.strip()
                     # Pattern 1: GENE_N  e.g. A_1, DRB1_2
                     m = re.match(r'^([A-Z0-9]+)_\d+$', col)
                     if m:
                         col_map[idx] = m.group(1)
                         continue
                     # Pattern 2: GENE+digit  e.g. A1, A2, B1, DRB11, DQB12
-                    # Greedy match: longest known gene name
                     m2 = re.match(r'^(DRB1|DQA1|DQB1|DPA1|DPB1|[A-Z])(\d+)$', col)
                     if m2:
                         col_map[idx] = m2.group(1)
+                        continue
+                    # Pattern 3: HLA-GENE N  e.g. "HLA-A 1", "HLA-DQB1 2"
+                    m3 = re.match(r'^HLA-([A-Z0-9]+)\s+\d+$', col)
+                    if m3:
+                        col_map[idx] = m3.group(1)
+
+                # Detect raw space-quoted 1KGP format: header is just ['Sample']
+                # (file was not converted by download-gt). Fall back to shlex parsing.
+                if not col_map and len(header) == 1 and header[0].strip().lower() == 'sample':
+                    logger.warning(
+                        "GT file appears to be the raw space-quoted 1KGP format "
+                        "(header='Sample' only). Switching to shlex positional parsing."
+                    )
+                    _RAW_GENE_COLS = {
+                        'A': [2, 3], 'B': [4, 5], 'C': [6, 7],
+                        'DRB1': [8, 9], 'DQB1': [10, 11],
+                    }
+                    for gene, idxs in _RAW_GENE_COLS.items():
+                        for idx in idxs:
+                            col_map[idx] = gene
+                    sep = '__shlex__'  # sentinel: use shlex.split() for data rows
                 continue
 
-            sample = parts[0].strip()
+            sample = parts[sample_col_idx].strip() if sample_col_idx < len(parts) else ''
             if not sample:
                 continue
 
@@ -346,6 +382,101 @@ def locus_correct(tool_calls: List[AlleleCall], truth_alleles: List[str]) -> boo
     return called_set == truth_set
 
 
+def inspect_concordance(
+    ground_truth: Dict[str, Dict[str, List[str]]],
+    results_dir: str,
+    tool: str,
+    resolution: str = '2-field',
+    genes: Optional[List[str]] = None,
+    show_only_errors: bool = False,
+    output_path: Optional[str] = None,
+) -> None:
+    """Print per-sample, per-gene concordance table comparing GT vs tool calls.
+
+    Accuracy = #right / (#right + #wrong + #NA)
+    where NA = GT sample exists but tool produced no result for this gene.
+    """
+    eval_genes = set(genes) if genes else set(CLASSICAL_GENES)
+    results_dir_path = Path(results_dir)
+    result_dir = results_dir_path / tool
+
+    if not result_dir.is_dir():
+        logger.error(f"No results directory for tool '{tool}': {result_dir}")
+        sys.exit(1)
+
+    parser_fn = TOOL_PARSERS.get(tool)
+    if not parser_fn:
+        logger.error(f"Unknown tool '{tool}'. Available: {list(TOOL_PARSERS.keys())}")
+        sys.exit(1)
+
+    n_right = n_wrong = n_na = 0
+    out_rows = []  # for TSV file: (sample, gene, gt1, gt2, called_str, status)
+
+    header_line = f"{'Sample':<12} {'Gene':<6} {'GT_1':<14} {'GT_2':<14} {'Called':<32} {'Status'}"
+    sep_line = '-' * 92
+    print(f"\n{header_line}")
+    print(sep_line)
+
+    for sample, truth_genes in sorted(ground_truth.items()):
+        result_file = result_dir / f"{sample}_{tool}.txt"
+        tool_results = None
+        if result_file.exists():
+            tool_results = parser_fn(str(result_file), resolution)
+
+        for gene in sorted(eval_genes):
+            if gene not in truth_genes:
+                continue
+            truth_alleles = truth_genes[gene]
+            if not truth_alleles:
+                continue
+
+            gt_sorted = sorted(set(truth_alleles))
+            gt1 = gt_sorted[0] if gt_sorted else '-'
+            gt2 = gt_sorted[1] if len(gt_sorted) > 1 else '(hom)'
+
+            if tool_results is None:
+                status = 'NA'
+                called_str = '(no result file)'
+                n_na += 1
+            else:
+                hla_gene = f"HLA-{gene}"
+                tool_calls = tool_results.get(hla_gene, [])
+                if not tool_calls:
+                    status = 'NA'
+                    called_str = '(not typed)'
+                    n_na += 1
+                elif locus_correct(tool_calls, truth_alleles):
+                    status = 'OK'
+                    called_str = ', '.join(sorted({c.allele for c in tool_calls}))
+                    n_right += 1
+                else:
+                    status = 'MISMATCH'
+                    called_str = ', '.join(sorted({c.allele for c in tool_calls}))
+                    n_wrong += 1
+
+            out_rows.append((sample, gene, gt1, gt2, called_str, status))
+
+            if show_only_errors and status in ('OK', 'NA'):
+                continue
+            print(f"{sample:<12} {gene:<6} {gt1:<14} {gt2:<14} {called_str:<32} {status}")
+
+    n_total = n_right + n_wrong + n_na
+    print(sep_line)
+    if n_total > 0:
+        print(f"Accuracy (right/total): {n_right}/{n_total} ({100*n_right/n_total:.1f}%)")
+        print(f"  right={n_right}  wrong={n_wrong}  NA={n_na}")
+    else:
+        print("No GT samples matched any result files.")
+
+    if output_path:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, 'w') as fout:
+            fout.write('\t'.join(['Sample', 'Gene', 'GT_1', 'GT_2', 'Called', 'Status']) + '\n')
+            for row in out_rows:
+                fout.write('\t'.join(str(x) for x in row) + '\n')
+        print(f"\n[OK] Results saved to: {output_path}")
+
+
 # ---------------------------------------------------------------------------
 # Core calibration
 # ---------------------------------------------------------------------------
@@ -391,15 +522,22 @@ def calibrate(
 
     logger.info(f"Tools found: {available_tools}")
 
-    # Structures: correct[tool][gene], total[tool][gene]
+    # Pre-compute GT sample count per gene (denominator for new accuracy formula:
+    # accuracy = #right / (#right + #wrong + #NA))
+    gt_total_per_gene: Dict[str, int] = defaultdict(int)
+    for _sample_gt, _truth_genes in ground_truth.items():
+        for _gene, _alleles in _truth_genes.items():
+            if _alleles and _gene in eval_genes:
+                gt_total_per_gene[_gene] += 1
+
+    # Structures: correct[tool][gene] (right calls only; wrong+NA = denominator-right)
     correct: Dict[str, Dict[str, int]] = {t: defaultdict(int) for t in available_tools}
-    total:   Dict[str, Dict[str, int]] = {t: defaultdict(int) for t in available_tools}
 
     for sample, truth_genes in ground_truth.items():
         for tool in available_tools:
             result_file = results_dir_path / tool / f"{sample}_{tool}.txt"
             if not result_file.exists():
-                continue
+                continue  # NA — counted in gt_total_per_gene, not in correct
 
             parser = TOOL_PARSERS[tool]
             tool_results = parser(str(result_file), resolution)  # {HLA-GENE: [AlleleCall]}
@@ -418,31 +556,36 @@ def calibrate(
 
                 hla_gene = f"HLA-{gene_short}"
                 tool_calls = tool_results.get(hla_gene, [])
+                # NA (gene not typed in this result) — counted in gt_total, not here
+                if not tool_calls:
+                    continue
 
-                total[tool][gene_short] += 1
                 if locus_correct(tool_calls, truth_alleles):
                     correct[tool][gene_short] += 1
 
-    # Compute concordance rates
+    # Compute accuracy = #right / (#right + #wrong + #NA)
+    # Denominator = all GT samples for this gene (regardless of whether tool typed them)
     accuracy: Dict[str, Dict[str, float]] = {}
     for tool in available_tools:
         accuracy[tool] = {}
         for gene in CLASSICAL_GENES:
-            n = total[tool].get(gene, 0)
+            n_gt = gt_total_per_gene.get(gene, 0)
             c = correct[tool].get(gene, 0)
-            if n > 0:
-                accuracy[tool][gene] = c / n
-            else:
-                # Gene not evaluated (not in GT or not typed by tool)
+            if n_gt == 0 or gene not in eval_genes:
                 accuracy[tool][gene] = None  # type: ignore[assignment]
+            elif gene not in TOOL_GENE_COVERAGE.get(tool, set()):
+                # Tool doesn't cover this gene → accuracy = 0 (all NA)
+                accuracy[tool][gene] = 0.0
+            else:
+                accuracy[tool][gene] = c / n_gt  # right / (right + wrong + NA)
 
         typed_genes = [g for g in CLASSICAL_GENES if accuracy[tool][g] is not None]
         if typed_genes:
             mean_acc = mean(accuracy[tool][g] for g in typed_genes)  # type: ignore[misc]
             logger.info(
-                f"  {tool:12s}  mean concordance = {mean_acc:.3f}  "
+                f"  {tool:12s}  mean accuracy = {mean_acc:.3f}  "
                 f"(n_genes={len(typed_genes)}, "
-                f"n_samples={max(total[tool].values(), default=0)})"
+                f"n_gt_samples={max(gt_total_per_gene.values(), default=0)})"
             )
 
     return accuracy
@@ -1067,6 +1210,21 @@ def cmd_calibrate(args: argparse.Namespace) -> None:
             )
 
 
+def cmd_inspect(args: argparse.Namespace) -> None:
+    """Print per-sample GT vs tool concordance table for visual verification."""
+    genes: Optional[List[str]] = None
+    if args.genes:
+        genes = [g.strip().upper() for g in args.genes.split(',') if g.strip()]
+    ground_truth = load_ground_truth(args.ground_truth, args.resolution)
+    inspect_concordance(
+        ground_truth, args.results_dir, args.tool,
+        resolution=args.resolution,
+        genes=genes,
+        show_only_errors=args.errors_only,
+        output_path=getattr(args, 'output', None),
+    )
+
+
 def cmd_compare_strategies(args: argparse.Namespace) -> None:
     """Compare voting strategy concordances with optional Wilcoxon significance tests."""
     genes: Optional[List[str]] = None
@@ -1148,7 +1306,7 @@ def build_parser() -> argparse.ArgumentParser:
         description='Calibrate HLA tool weights from 1000 Genomes ground truth',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    sub = p.add_subparsers(dest='command', required=True)
+    sub = p.add_subparsers(dest='command')  # required=True not supported in Python 3.6
 
     # --- download-gt ---
     dl = sub.add_parser('download-gt', help='Download and reformat 1KGP HLA ground truth')
@@ -1218,6 +1376,27 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument('--output', default=None,
                      help='Output TSV with per-gene statistics (optional)')
     cmp.set_defaults(func=cmd_compare_strategies)
+
+    # --- inspect ---
+    insp = sub.add_parser(
+        'inspect',
+        help='Print per-sample GT vs tool concordance table for visual verification',
+    )
+    insp.add_argument('--ground-truth', required=True,
+                      help='Ground-truth TSV (from download-gt or custom)')
+    insp.add_argument('--results-dir', required=True,
+                      help='Directory containing per-tool subdirs (by_tool/)')
+    insp.add_argument('--tool', required=True,
+                      help='Tool to inspect (e.g. optitype, hlahd, spechla, arcashla)')
+    insp.add_argument('--genes', default=None,
+                      help='Comma-separated genes to show (default: all classical genes)')
+    insp.add_argument('--resolution', default='2-field',
+                      choices=['2-field', '4-field'])
+    insp.add_argument('--errors-only', action='store_true',
+                      help='Only show discordant (MISMATCH) samples on screen (NA rows still counted)')
+    insp.add_argument('--output', default=None, metavar='FILE',
+                      help='Save full per-sample TSV to this file (all rows including NA)')
+    insp.set_defaults(func=cmd_inspect)
 
     return p
 
