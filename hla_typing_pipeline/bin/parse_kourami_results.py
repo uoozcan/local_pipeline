@@ -80,7 +80,7 @@ def main():
 
     with open(args.output, 'w') as out:
         out.write(f"# Kourami results for {args.sample}\n")
-        out.write("# Tool: Kourami v0.9.6 — Class I, hg38/hs38NoAltDH\n")
+        out.write("# Tool: Kourami v0.9.6 -- Class I, hg38/hs38NoAltDH\n")
         out.write("#\n")
         out.write("Gene\tAllele1\tAllele2\tReads1\tReads2\n")
 
