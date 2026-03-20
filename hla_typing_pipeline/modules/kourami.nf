@@ -4,17 +4,21 @@
  * Adds algorithmic diversity: assembly-graph approach distinct from all current pipeline tools
  * BAM input only — requires hg38/GRCh38-aligned coordinate-sorted BAM
  *
- * Prerequisites (set in nextflow.config / run.config):
- *   params.kourami_dir  — path to Kourami install dir (contains build/Kourami.jar)
- *   params.kourami_db   — path to IMGT-formatted HLA DB (contains All_FINAL_with_Decoy.fa.gz + BWA index)
+ * Container: zlskidmore/kourami (docker://zlskidmore/kourami → kourami.sif)
+ *   - Kourami.jar: /usr/local/bin/kourami-0.9.6/target/Kourami.jar (also /usr/local/bin/Kourami.jar)
+ *   - BWA: /usr/local/bin/bwa
+ *   - Java: OpenJDK 10.0.2
+ *   - DB: /usr/local/bin/kourami-0.9.6/db/ (bundled, 159 MB) — no external DB mount needed
+ *   - samtools: NOT in container → bind-mount samtools wrapper (same pattern as HLAHD/xHLA)
+ *
+ * Prerequisites (set in run.config):
+ *   containerOptions: bind samtools wrapper + arcas-hla env (see run.config KOURAMI block)
+ *   params.kourami_dir (optional): override Kourami install dir (default: /usr/local/bin/kourami-0.9.6)
+ *   params.kourami_db  (optional): override DB path (default: bundled DB in container)
  *
  * HLA read extraction:
  *   By default: samtools extracts reads from the HLA region directly (no reference needed).
  *   Optional: set params.kourami_hs38_ref to use Kourami's alignAndExtract_hs38DH.sh script instead.
- *
- * Host tools used: samtools, bwa, java ≥11 (or provide via container)
- *   Container must include: bash, bwa, samtools, java ≥11
- *   Build from kourami_preprocess.dockerfile in linnil1/HLA_collections + add openjdk-11-jdk
  */
 
 process KOURAMI {
@@ -32,8 +36,8 @@ process KOURAMI {
     path "versions.yml", emit: versions
 
     script:
-    def kourami_dir = params.kourami_dir ?: '/opt/kourami'
-    def kourami_db  = params.kourami_db  ?: '/opt/kourami_db'
+    def kourami_dir = params.kourami_dir ?: '/usr/local/bin/kourami-0.9.6'
+    def kourami_db  = params.kourami_db  ?: '/usr/local/bin/kourami-0.9.6/db'
     def hs38_ref    = params.kourami_hs38_ref  // null = use samtools direct extraction
     """
     echo "[Kourami] Running on ${sample_id}..."
@@ -83,7 +87,12 @@ process KOURAMI {
     samtools index ${sample_id}.panel.bam
 
     # Step 3: Kourami assembly-graph typing
-    java -Xmx10g -jar ${kourami_dir}/build/Kourami.jar \
+    # Jar location differs: container uses target/Kourami.jar; local build uses build/Kourami.jar;
+    # /usr/local/bin/Kourami.jar is a direct symlink available in the zlskidmore/kourami container.
+    KOURAMI_JAR="${kourami_dir}/build/Kourami.jar"
+    [ -f "\$KOURAMI_JAR" ] || KOURAMI_JAR="${kourami_dir}/target/Kourami.jar"
+    [ -f "\$KOURAMI_JAR" ] || KOURAMI_JAR="/usr/local/bin/Kourami.jar"
+    java -Xmx10g -jar \$KOURAMI_JAR \
         -d ${kourami_db} \
         ${sample_id}.panel.bam \
         -o ${sample_id}.kourami || true
