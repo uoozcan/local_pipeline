@@ -1,6 +1,7 @@
 /*
  * Preprocessing Module
  * Extract HLA reads and convert to FASTQ for downstream HLA typing
+ * Also handles CRAM → BAM conversion (requires reference FASTA)
  * Uses basetools container with samtools
  */
 
@@ -186,6 +187,71 @@ process EXTRACT_HLA_READS_HLAHD {
     "${task.process}":
         samtools: \$(samtools --version | head -1 | cut -d' ' -f2)
     END_VERSIONS
+    """
+}
+
+/*
+ * Convert CRAM to coordinate-sorted BAM
+ *
+ * CRAM files are compressed against a reference genome and require the same
+ * reference FASTA for decoding. The output BAM is indexed and ready for all
+ * downstream HLA typing tools.
+ *
+ * Usage in pipeline (set reference_fasta in nextflow.config or run.config):
+ *   CRAM_TO_BAM(ch_cram, params.reference_fasta)
+ *
+ * Samplesheet: use 'cram_path' column instead of 'bam_path'
+ * CLI:         --input_cram sample.cram --reference_fasta /path/to/ref.fa
+ */
+process CRAM_TO_BAM {
+    tag "$sample_id"
+    label 'process_medium'
+    publishDir "${params.outdir}/${sample_id}/cram_to_bam", mode: 'copy', pattern: "*.log"
+
+    input:
+    tuple val(sample_id), path(cram)
+    path(reference_fasta)
+
+    output:
+    tuple val(sample_id), path("${sample_id}.bam"), emit: bam
+    path("${sample_id}_cram_to_bam.log"), emit: log
+    path "versions.yml", emit: versions
+
+    script:
+    """
+    echo "CRAM to BAM conversion for ${sample_id}" > ${sample_id}_cram_to_bam.log
+    echo "CRAM: ${cram}" >> ${sample_id}_cram_to_bam.log
+    echo "Reference: ${reference_fasta}" >> ${sample_id}_cram_to_bam.log
+    echo "Date: \$(date)" >> ${sample_id}_cram_to_bam.log
+
+    # Create CRAM index if missing (.crai)
+    if [ ! -f "${cram}.crai" ] && [ ! -f "${cram.baseName}.crai" ]; then
+        echo "Creating CRAM index..." | tee -a ${sample_id}_cram_to_bam.log
+        samtools index ${cram}
+    fi
+
+    # Decode CRAM → coordinate-sorted BAM using the reference
+    samtools view -@ ${task.cpus} -b -T ${reference_fasta} -o ${sample_id}_unsorted.bam ${cram} \
+        2>>${sample_id}_cram_to_bam.log \
+        || { echo "ERROR: samtools view (CRAM decode) failed" | tee -a ${sample_id}_cram_to_bam.log; exit 1; }
+
+    # Sort by coordinate (CRAM may not be coordinate-sorted or index may differ)
+    samtools sort -@ ${task.cpus} -o ${sample_id}.bam ${sample_id}_unsorted.bam \
+        2>>${sample_id}_cram_to_bam.log
+
+    # Index the output BAM
+    samtools index ${sample_id}.bam
+
+    # Summary
+    READS=\$(samtools view -c ${sample_id}.bam)
+    echo "Output BAM reads: \${READS}" | tee -a ${sample_id}_cram_to_bam.log
+
+    rm -f ${sample_id}_unsorted.bam
+
+    cat <<-END_VERSIONS > versions.yml
+	"${task.process}":
+	    samtools: \$(samtools --version | head -1 | cut -d' ' -f2)
+	END_VERSIONS
     """
 }
 

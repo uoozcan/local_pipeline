@@ -2,8 +2,8 @@
 
 /*
  * HLA Typing Pipeline
- * Multi-tool HLA typing from BAM/FASTQ with weighted consensus voting
- * Supports both BAM and paired FASTQ inputs
+ * Multi-tool HLA typing from BAM/FASTQ/CRAM with weighted consensus voting
+ * Supports BAM, CRAM, and paired FASTQ inputs
  * Includes FastQC, visualizations, and MultiQC integration
  *
  * Authors: HLA Analysis Team
@@ -55,6 +55,9 @@ include { HLA_LOH; HLA_LOH_VISUALIZE; HLA_LOH_SUMMARY } from './modules/loh'
 // Import multi-source module
 include { MULTISOURCE_CONSENSUS } from './modules/multisource'
 
+// Import CRAM-to-BAM conversion
+include { CRAM_TO_BAM } from './modules/preprocess'
+
 // Help message
 def helpMessage() {
     log.info """
@@ -64,16 +67,22 @@ def helpMessage() {
 
     Usage:
         nextflow run main.nf --input_bam sample.bam --outdir results
+        nextflow run main.nf --input_cram sample.cram --reference_fasta ref.fa --outdir results
         nextflow run main.nf --input_fastq_1 R1.fq.gz --input_fastq_2 R2.fq.gz --outdir results
 
     Input options (choose one):
         --input_bam           Path to input BAM file (single sample)
+        --input_cram          Path to input CRAM file (single sample; requires --reference_fasta)
         --input_fastq_1       Path to R1 FASTQ file (single sample)
         --input_fastq_2       Path to R2 FASTQ file (single sample)
         --input_samplesheet   Path to samplesheet CSV (multiple samples)
 
+    CRAM decoding:
+        --reference_fasta     Reference FASTA used to encode the CRAM (required for CRAM input)
+
     Samplesheet format (CSV with header):
         For BAM:   sample_id,bam_path
+        For CRAM:  sample_id,cram_path  (requires --reference_fasta)
         For FASTQ: sample_id,fastq_1,fastq_2
         For multi-source (auto-detected when header contains patient_id and seq_type):
                    patient_id,sample_id,seq_type,bam_path,fastq_1,fastq_2
@@ -138,8 +147,14 @@ def helpMessage() {
         # Single paired FASTQ files
         nextflow run main.nf --input_fastq_1 R1.fq.gz --input_fastq_2 R2.fq.gz -profile singularity
 
+        # Single CRAM file
+        nextflow run main.nf --input_cram sample.cram --reference_fasta /path/to/ref.fa -profile singularity
+
         # Multiple samples with samplesheet (BAM)
         nextflow run main.nf --input_samplesheet samples_bam.csv -profile singularity
+
+        # Multiple samples with samplesheet (CRAM)
+        nextflow run main.nf --input_samplesheet samples_cram.csv --reference_fasta /path/to/ref.fa -profile singularity
 
         # Multiple samples with samplesheet (FASTQ)
         nextflow run main.nf --input_samplesheet samples_fastq.csv -profile singularity
@@ -164,6 +179,12 @@ def input_type = null
 def is_multisource = false
 if (params.input_bam) {
     input_type = 'bam'
+} else if (params.input_cram) {
+    input_type = 'cram'
+    if (!params.reference_fasta) {
+        log.error "CRAM input requires --reference_fasta to decode the CRAM file"
+        exit 1
+    }
 } else if (params.input_fastq_1 && params.input_fastq_2) {
     input_type = 'fastq'
 } else if (params.input_samplesheet) {
@@ -176,11 +197,17 @@ if (params.input_bam) {
         is_multisource = true
     } else if (header.contains('fastq_1') || header.contains('fastq1') || header.contains('fq1')) {
         input_type = 'fastq'
+    } else if (header.contains('cram_path')) {
+        input_type = 'cram'
+        if (!params.reference_fasta) {
+            log.error "CRAM samplesheet requires --reference_fasta to decode CRAM files"
+            exit 1
+        }
     } else {
         input_type = 'bam'
     }
 } else {
-    log.error "Please provide input: --input_bam, --input_fastq_1/--input_fastq_2, or --input_samplesheet"
+    log.error "Please provide input: --input_bam, --input_cram, --input_fastq_1/--input_fastq_2, or --input_samplesheet"
     helpMessage()
     exit 1
 }
@@ -252,7 +279,7 @@ log.info """
 HLA Typing Pipeline  v${workflow.manifest.version}
 ===========================================
 Input type      : ${input_type.toUpperCase()}${is_multisource ? ' (multi-source)' : ''}
-Input           : ${params.input_bam ?: params.input_fastq_1 ?: params.input_samplesheet}
+Input           : ${params.input_bam ?: params.input_cram ?: params.input_fastq_1 ?: params.input_samplesheet}
 Output          : ${params.outdir}
 Reference       : ${params.reference}
 Tools           : ${tools_list.join(', ')}${is_multisource ? ' (filtered per seq_type)' : ''}
@@ -275,6 +302,20 @@ def create_bam_channel() {
             .fromPath(params.input_samplesheet)
             .splitCsv(header: true)
             .map { row -> [row.sample_id, file(row.bam_path)] }
+    }
+}
+
+// Create input channel for CRAM
+def create_cram_channel() {
+    if (params.input_cram) {
+        def cram_file = file(params.input_cram)
+        def sample_id = cram_file.baseName.replaceAll(/\.cram$/, '')
+        return Channel.of([sample_id, cram_file])
+    } else {
+        return Channel
+            .fromPath(params.input_samplesheet)
+            .splitCsv(header: true)
+            .map { row -> [row.sample_id, file(row.cram_path)] }
     }
 }
 
@@ -325,7 +366,80 @@ workflow {
     // QC reports channel
     ch_qc_reports = Channel.empty()
 
-    if (input_type == 'bam') {
+    if (input_type == 'cram') {
+        // ===== CRAM INPUT WORKFLOW =====
+        // Convert CRAM → BAM, then proceed with the standard BAM workflow
+        ch_cram = create_cram_channel()
+        CRAM_TO_BAM(ch_cram, file(params.reference_fasta))
+        ch_bam_from_cram = CRAM_TO_BAM.out.bam
+        ch_qc_reports = ch_qc_reports.mix(CRAM_TO_BAM.out.log.map { it })
+
+        if (params.skip_qc) {
+            ch_input = ch_bam_from_cram
+        } else {
+            QC_BAM(
+                ch_bam_from_cram,
+                params.reference,
+                params.min_hla_reads,
+                params.min_read_length
+            )
+            ch_input = QC_BAM.out.validated_bam
+            ch_qc_reports = ch_qc_reports.mix(QC_BAM.out.qc_report)
+
+            FASTQC_BAM(ch_bam_from_cram)
+            ch_fastqc = ch_fastqc.mix(FASTQC_BAM.out.zip.map { sample_id, zip -> zip })
+        }
+
+        // Run the same BAM tools as in the BAM workflow
+        if ('spechla' in tools_list) {
+            SPECHLA(ch_input, params.reference)
+            ch_results = ch_results.mix(SPECHLA.out.results.map { sample_id, result_file ->
+                [sample_id, 'spechla', result_file]
+            })
+        }
+        if ('hlahd' in tools_list) {
+            HLAHD(ch_input, params.reference, params.hla_genes)
+            ch_results = ch_results.mix(HLAHD.out.results.map { sample_id, result_file ->
+                [sample_id, 'hlahd', result_file]
+            })
+        }
+        if ('hlala' in tools_list) {
+            HLALA(ch_input, params.hlala_graph)
+            ch_results = ch_results.mix(HLALA.out.results.map { sample_id, result_file ->
+                [sample_id, 'hlala', result_file]
+            })
+        }
+        if ('arcashla' in tools_list) {
+            ARCASHLA(ch_input, params.reference)
+            ch_results = ch_results.mix(ARCASHLA.out.results.map { sample_id, result_file ->
+                [sample_id, 'arcashla', result_file]
+            })
+        }
+        if ('optitype' in tools_list) {
+            OPTITYPE(ch_input, params.reference)
+            ch_results = ch_results.mix(OPTITYPE.out.results.map { sample_id, result_file ->
+                [sample_id, 'optitype', result_file]
+            })
+        }
+        if ('xhla' in tools_list) {
+            XHLA(ch_input, params.reference)
+            ch_results = ch_results.mix(XHLA.out.results.map { sample_id, result_file ->
+                [sample_id, 'xhla', result_file]
+            })
+        }
+        if ('polysolver' in tools_list) {
+            POLYSOLVER(ch_input, params.reference)
+            ch_results = ch_results.mix(POLYSOLVER.out.results.map { sample_id, result_file ->
+                [sample_id, 'polysolver', result_file]
+            })
+        }
+        if ('kourami' in tools_list) {
+            KOURAMI(ch_input)
+            ch_results = ch_results.mix(KOURAMI.out.results.map { sample_id, result_file ->
+                [sample_id, 'kourami', result_file]
+            })
+        }
+    } else if (input_type == 'bam') {
         // ===== BAM INPUT WORKFLOW =====
         ch_bam = create_bam_channel()
 
