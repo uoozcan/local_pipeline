@@ -47,7 +47,7 @@ POLYSOLVER_SIF="/scratch/${PROJECT_ID}/hla_references/singularity_cache/containe
 # POLYSOLVER hg19 mode: extracts reads from chr6 without "chr" prefix
 POLYSOLVER_BUILD="hg19"
 HLA_REGION="6:28000000-34000000"    # no "chr" prefix for hs37d5
-HG19_REF="/scratch/${PROJECT_ID}/hla_references/hs37d5/hs37d5.fa"   # hg19/hs37d5 reference
+HG19_REF="/scratch/${PROJECT_ID}/references/hs37d5.fa"   # hg19/hs37d5 reference
 
 # CRAM accessions
 declare -A CRAM_ERR=(
@@ -144,7 +144,7 @@ PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline
 POLYSOLVER_SIF="/scratch/${PROJECT_ID}/hla_references/singularity_cache/containers/polysolver.sif"
 POLYSOLVER_BUILD="hg19"
 HLA_REGION="6:28000000-34000000"
-HG19_REF="/scratch/${PROJECT_ID}/hla_references/hs37d5/hs37d5.fa"
+HG19_REF="/scratch/${PROJECT_ID}/references/hs37d5.fa"
 SAMPLE_LIST_FILE="${BASE}/conf/polysolver_pending.txt"
 
 declare -A CRAM_ERR=(
