@@ -6,14 +6,12 @@
  *
  * Container: docker://sachet/polysolver:v4  (pull: singularity pull polysolver.sif docker://sachet/polysolver:v4)
  *
- * KNOWN ISSUE on WSL2 / modern kernels (tested Mar 2026):
- *   The novoalign binary inside the container (v2.07.18, built 2012) crashes with SIGSEGV
- *   on Linux kernels > ~4.x (prints "Interrupted..11 Stack Dump").
- *   POLYSOLVER will NOT produce results in this environment.
- *   Expected to work on native Linux (CentOS 7, Ubuntu 18.04) or HPC nodes.
- *
- * hg38 fix: SAMTOOLS_DIR env var is unset in the container for hg38 branch.
- *   Pass SINGULARITYENV_SAMTOOLS_DIR=/home/polysolver/binaries in run.config containerOptions.
+ * Fixes applied (effective on native Linux / Puhti; novoalign does NOT work on WSL2):
+ *   1. novoalign SIGSEGV: `ulimit -s unlimited` added; helps on some systems with small default stacks
+ *      NOTE: novoalign (v2 and v3) crashes with SIGSEGV on WSL2 kernel 6.6 regardless of ulimit —
+ *      WSL2-specific kernel incompatibility; works on native Linux (CentOS 7, Ubuntu 18.04+) and Puhti
+ *   2. hg38 SAMTOOLS_DIR: env var unset in container → `export SAMTOOLS_DIR=/home/polysolver/binaries`
+ *   3. hg38 Picard "Illegal mate state": fixmate pre-processing fixes inconsistent mate flags
  */
 
 process POLYSOLVER {
@@ -37,16 +35,28 @@ process POLYSOLVER {
 
     echo "[POLYSOLVER] Running on ${sample_id} (build: ${build})..."
 
-    # Ensure BAM index exists
-    [ -f "${bam}.bai" ] || samtools index ${bam}
+    # Fix 1: novoalign stack overflow on modern kernels (default 8MB stack too small)
+    ulimit -s unlimited
 
-    # Fix for hg38 branch: SAMTOOLS_DIR env var is unset in container
+    # Fix 2: SAMTOOLS_DIR env var is unset in container for hg38 branch
     export SAMTOOLS_DIR=/home/polysolver/binaries
+
+    # Fix 3: Picard SamToFastq "Illegal mate state" — pre-sort by name + fixmate + re-sort
+    # Required when BAM has inconsistent mate flags (common in some pipelines)
+    echo "[POLYSOLVER] Applying fixmate pre-processing for ${sample_id}..."
+    /home/polysolver/binaries/samtools sort -n -@ ${task.cpus} -o ${sample_id}_namesort.bam ${bam}
+    /home/polysolver/binaries/samtools fixmate -m ${sample_id}_namesort.bam ${sample_id}_fixmate.bam
+    /home/polysolver/binaries/samtools sort    -@ ${task.cpus} -o ${sample_id}_fixed.bam ${sample_id}_fixmate.bam
+    /home/polysolver/binaries/samtools index ${sample_id}_fixed.bam
+    POLYSOLVER_INPUT="${sample_id}_fixed.bam"
 
     # POLYSOLVER args: BAM race includeFreq build format insertCalc outdir
     # race=Unknown (population-agnostic), includeFreq=0, insertCalc=0 (germline)
     bash /home/polysolver/scripts/shell_call_hla_type \
-        ${bam} Unknown 0 ${build} STDFQ 0 ${sample_id}_polysolver_raw || true
+        \$POLYSOLVER_INPUT Unknown 0 ${build} STDFQ 0 ${sample_id}_polysolver_raw || true
+
+    # Cleanup intermediate BAMs
+    rm -f ${sample_id}_namesort.bam ${sample_id}_fixmate.bam ${sample_id}_fixed.bam ${sample_id}_fixed.bam.bai
 
     # Parse winners.hla.nofreq.txt → standard pipeline TSV
     if [ -f "${sample_id}_polysolver_raw/winners.hla.nofreq.txt" ]; then
