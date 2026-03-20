@@ -35,15 +35,19 @@
 #-----------------------------------------------------------------------------
 PROJECT_ID="project_2008084"
 BASE="/scratch/${PROJECT_ID}/ozcanumu/hla_calibration"
+FASTQ_DIR="${BASE}/1kgp_fastqs"
 RESULTS_DIR="${BASE}/1kgp_typing_results"
 LOGS_DIR="${BASE}/logs"
 WORK_BASE="${BASE}/polysolver_work"
 HLA_TOOLS="/scratch/${PROJECT_ID}/hla_tools"
-PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline_fresh/hla_typing_pipeline/bin"
-POLYSOLVER_SIF="${HLA_TOOLS}/containers/polysolver.sif"
-# 1KGP CRAMs are hs37d5 (hg37 = hg19 compatible)
+PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline/hla_typing_pipeline/bin"
+# SIF location confirmed by user (singularity_cache layout)
+POLYSOLVER_SIF="/scratch/${PROJECT_ID}/hla_references/singularity_cache/containers/polysolver.sif"
+# hs37d5 reference for FASTQ → BAM alignment (needed by POLYSOLVER)
+# POLYSOLVER hg19 mode: extracts reads from chr6 without "chr" prefix
 POLYSOLVER_BUILD="hg19"
 HLA_REGION="6:28000000-34000000"    # no "chr" prefix for hs37d5
+HG19_REF="/scratch/${PROJECT_ID}/hla_references/hs37d5/hs37d5.fa"   # hg19/hs37d5 reference
 
 # CRAM accessions
 declare -A CRAM_ERR=(
@@ -131,14 +135,16 @@ fi
 set -euo pipefail
 
 BASE="/scratch/${PROJECT_ID}/ozcanumu/hla_calibration"
+FASTQ_DIR="${BASE}/1kgp_fastqs"
 RESULTS_DIR="${BASE}/1kgp_typing_results"
 LOGS_DIR="${BASE}/logs"
 WORK_BASE="${BASE}/polysolver_work"
 HLA_TOOLS="/scratch/${PROJECT_ID}/hla_tools"
-PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline_fresh/hla_typing_pipeline/bin"
-POLYSOLVER_SIF="${HLA_TOOLS}/containers/polysolver.sif"
+PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline/hla_typing_pipeline/bin"
+POLYSOLVER_SIF="/scratch/${PROJECT_ID}/hla_references/singularity_cache/containers/polysolver.sif"
 POLYSOLVER_BUILD="hg19"
 HLA_REGION="6:28000000-34000000"
+HG19_REF="/scratch/${PROJECT_ID}/hla_references/hs37d5/hs37d5.fa"
 SAMPLE_LIST_FILE="${BASE}/conf/polysolver_pending.txt"
 
 declare -A CRAM_ERR=(
@@ -165,45 +171,66 @@ echo "Date: $(date)"
 
 #-----------------------------------------------------------------------------
 # Load modules
+# NOTE: singularity/apptainer is a system command on Puhti — no module needed
 #-----------------------------------------------------------------------------
 module purge
 module load gcc
 module load samtools/1.21
-module load singularity
+module load bwa   # needed for FASTQ → BAM alignment
 
-echo "samtools: $(samtools --version | head -1)"
-echo "singularity: $(singularity --version)"
+echo "samtools:   $(samtools --version | head -1)"
+echo "bwa:        $(bwa 2>&1 | head -1 || true)"
+echo "singularity: $(singularity --version 2>/dev/null || apptainer --version 2>/dev/null || echo 'check path')"
 
 #-----------------------------------------------------------------------------
-# Step 1: Stream HLA-region BAM from EBI CRAM
-#   POLYSOLVER requires a coordinate-sorted BAM; stream region and sort.
-#   CRAM is hs37d5 (hg19-like, no chr prefix).
+# Step 1: Get coordinate-sorted HLA-region BAM for POLYSOLVER
+#
+# POLYSOLVER requires a coordinate-sorted BAM aligned to hg19 (hs37d5).
+# Strategy:
+#   a) If pre-existing FASTQs found in FASTQ_DIR → align to hs37d5 with bwa
+#   b) If FASTQs missing but sample has known CRAM accession → stream from EBI
 #-----------------------------------------------------------------------------
 WORKDIR="${WORK_BASE}/${SAMPLE}"
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
 BAM="${WORKDIR}/${SAMPLE}.hla.bam"
+R1="${FASTQ_DIR}/${SAMPLE}_R1.fastq.gz"
+R2="${FASTQ_DIR}/${SAMPLE}_R2.fastq.gz"
 
-ERR="${CRAM_ERR[$SAMPLE]:-}"
-if [[ -z "$ERR" ]]; then
-    echo "ERROR: No CRAM accession for ${SAMPLE}"
-    exit 1
+if [[ -s "$R1" ]] && [[ -s "$R2" ]]; then
+    echo "[Step 1] Aligning pre-existing FASTQs to hs37d5 → BAM..."
+    if [[ ! -f "${HG19_REF}.bwt" ]]; then
+        echo "ERROR: hs37d5 BWA index not found at ${HG19_REF}.bwt"
+        echo "       Index with: bwa index ${HG19_REF}"
+        exit 1
+    fi
+    bwa mem -t "${SLURM_CPUS_PER_TASK:-4}" "$HG19_REF" "$R1" "$R2" \
+        2>"${LOGS_DIR}/polysolver_bwa_${SAMPLE}.log" \
+        | samtools sort -@ 4 -o "$BAM" \
+        2>>"${LOGS_DIR}/polysolver_bwa_${SAMPLE}.log" \
+        || { echo "ERROR: bwa/samtools failed"; tail -5 "${LOGS_DIR}/polysolver_bwa_${SAMPLE}.log"; exit 1; }
+    samtools index "$BAM"
+    echo "[OK] BAM from FASTQs: $(du -sh $BAM | cut -f1) ($(samtools view -c $BAM) reads)"
+
+else
+    echo "[Step 1] FASTQs not found — streaming HLA region from EBI CRAM..."
+    ERR="${CRAM_ERR[$SAMPLE]:-}"
+    if [[ -z "$ERR" ]]; then
+        echo "ERROR: No FASTQ in ${FASTQ_DIR} and no CRAM accession for ${SAMPLE}"
+        exit 1
+    fi
+    PREFIX="${ERR:0:6}"
+    CRAM_URL="${EBI_BASE}/${PREFIX}/${ERR}/${SAMPLE}.final.cram"
+    echo "CRAM URL: ${CRAM_URL}"
+    samtools view -b -@ 4 "$CRAM_URL" "$HLA_REGION" \
+        2>"${LOGS_DIR}/polysolver_stream_${SAMPLE}.log" \
+        | samtools sort -@ 4 -o "$BAM" \
+        2>>"${LOGS_DIR}/polysolver_stream_${SAMPLE}.log" \
+        || { echo "ERROR: samtools stream/sort failed"; cat "${LOGS_DIR}/polysolver_stream_${SAMPLE}.log"; exit 1; }
+    samtools index "$BAM"
+    echo "[OK] BAM from CRAM: $(du -sh $BAM | cut -f1) ($(samtools view -c $BAM) reads)"
 fi
-
-PREFIX="${ERR:0:6}"
-CRAM_URL="${EBI_BASE}/${PREFIX}/${ERR}/${SAMPLE}.final.cram"
-echo "CRAM URL: ${CRAM_URL}"
-
-echo "Streaming HLA region (${HLA_REGION})..."
-samtools view -b -@ 4 "$CRAM_URL" "$HLA_REGION" \
-    2>"${LOGS_DIR}/polysolver_stream_${SAMPLE}.log" \
-    | samtools sort -@ 4 -o "$BAM" \
-    2>>"${LOGS_DIR}/polysolver_stream_${SAMPLE}.log" \
-    || { echo "ERROR: samtools stream/sort failed"; cat "${LOGS_DIR}/polysolver_stream_${SAMPLE}.log"; exit 1; }
-
-samtools index "$BAM"
-echo "[OK] BAM: $(du -sh $BAM | cut -f1) ($(samtools flagstat $BAM | head -1))"
 
 #-----------------------------------------------------------------------------
 # Step 2: Run POLYSOLVER
