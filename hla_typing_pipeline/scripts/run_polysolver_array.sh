@@ -190,10 +190,10 @@ echo "singularity: $(singularity --version 2>/dev/null || apptainer --version 2>
 #   a) If pre-existing FASTQs found in FASTQ_DIR → align to hs37d5 with bwa
 #   b) If FASTQs missing but sample has known CRAM accession → stream from EBI
 #-----------------------------------------------------------------------------
-# Use compute node's local NVMe TMPDIR for all POLYSOLVER work.
-# This keeps ~4,400 temp BAMs off the Lustre scratch filesystem entirely,
-# avoiding the 1M-file quota. TMPDIR is auto-cleaned when the SLURM job ends.
-WORKDIR="${TMPDIR:-${WORK_BASE}}/${SAMPLE}"
+# Use Lustre scratch for work (TMPDIR on Puhti small-partition nodes is a tiny
+# RAM-based /tmp — POLYSOLVER's ~4,400 temp BAMs overflow it).
+# File quota is managed by aggressive cleanup after each sample (see below).
+WORKDIR="${WORK_BASE}/${SAMPLE}"
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
@@ -253,7 +253,6 @@ echo "[Step 2] Running POLYSOLVER (build=${POLYSOLVER_BUILD})..."
 # SAMTOOLS_DIR must be set inside container for POLYSOLVER hg38/hg19 script path
 singularity exec \
     --bind "${WORKDIR}:${WORKDIR}" \
-    --bind "${LOGS_DIR}:${LOGS_DIR}" \
     "$POLYSOLVER_SIF" \
     bash -c "
         export SAMTOOLS_DIR=/home/polysolver/binaries
@@ -287,19 +286,19 @@ fi
 echo "[OK] Winners file found:"
 cat "$WINNERS"
 
-# Copy winners to scratch now — TMPDIR will be gone when job ends
-SCRATCH_WINNERS="${WORK_BASE}/${SAMPLE}_winners.hla.nofreq.txt"
-mkdir -p "$WORK_BASE"
-cp "$WINNERS" "$SCRATCH_WINNERS"
-echo "[OK] Winners backed up to scratch: ${SCRATCH_WINNERS}"
+# Delete all temp BAMs/SAMs immediately — keeps ~4,400 files off scratch quota.
+# Winners file is preserved; everything else in polysolver_out can go.
+echo "[Cleanup] Removing temp BAMs from polysolver_out..."
+find "$POLY_OUT" ! -name 'winners*' -type f -delete
+echo "[Cleanup] Done ($(find "$POLY_OUT" | wc -l) files remaining in polysolver_out)"
 
 #-----------------------------------------------------------------------------
 # Step 3: Parse winners.hla.nofreq.txt → standard pipeline TSV
 #-----------------------------------------------------------------------------
-RESULT_TSV="${WORK_BASE}/${SAMPLE}_polysolver.txt"
+RESULT_TSV="${WORKDIR}/${SAMPLE}_polysolver.txt"
 
 python3 "${PIPELINE_BIN}/parse_polysolver_results.py" \
-    --input "$SCRATCH_WINNERS" \
+    --input "$WINNERS" \
     --sample "$SAMPLE" \
     --output "$RESULT_TSV" \
     || { echo "ERROR: parse_polysolver_results.py failed"; exit 1; }
@@ -336,8 +335,9 @@ DST="${RESULTS_DIR}/by_tool/polysolver/${SAMPLE}_polysolver.txt"
 ln -sf "$SRC" "$DST"
 echo "[OK] Symlinked: ${DST}"
 
-# Clean up scratch winners backup (result already published above)
-rm -f "$SCRATCH_WINNERS"
+# Clean up entire work dir — result is published, nothing needed here anymore
+rm -rf "$WORKDIR"
+echo "[Cleanup] Removed WORKDIR: ${WORKDIR}"
 
 echo ""
 echo "=== Done: ${SAMPLE} ==="
