@@ -190,7 +190,10 @@ echo "singularity: $(singularity --version 2>/dev/null || apptainer --version 2>
 #   a) If pre-existing FASTQs found in FASTQ_DIR → align to hs37d5 with bwa
 #   b) If FASTQs missing but sample has known CRAM accession → stream from EBI
 #-----------------------------------------------------------------------------
-WORKDIR="${WORK_BASE}/${SAMPLE}"
+# Use compute node's local NVMe TMPDIR for all POLYSOLVER work.
+# This keeps ~4,400 temp BAMs off the Lustre scratch filesystem entirely,
+# avoiding the 1M-file quota. TMPDIR is auto-cleaned when the SLURM job ends.
+WORKDIR="${TMPDIR:-${WORK_BASE}}/${SAMPLE}"
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
@@ -250,6 +253,7 @@ echo "[Step 2] Running POLYSOLVER (build=${POLYSOLVER_BUILD})..."
 # SAMTOOLS_DIR must be set inside container for POLYSOLVER hg38/hg19 script path
 singularity exec \
     --bind "${WORKDIR}:${WORKDIR}" \
+    --bind "${LOGS_DIR}:${LOGS_DIR}" \
     "$POLYSOLVER_SIF" \
     bash -c "
         export SAMTOOLS_DIR=/home/polysolver/binaries
@@ -283,13 +287,19 @@ fi
 echo "[OK] Winners file found:"
 cat "$WINNERS"
 
+# Copy winners to scratch now — TMPDIR will be gone when job ends
+SCRATCH_WINNERS="${WORK_BASE}/${SAMPLE}_winners.hla.nofreq.txt"
+mkdir -p "$WORK_BASE"
+cp "$WINNERS" "$SCRATCH_WINNERS"
+echo "[OK] Winners backed up to scratch: ${SCRATCH_WINNERS}"
+
 #-----------------------------------------------------------------------------
 # Step 3: Parse winners.hla.nofreq.txt → standard pipeline TSV
 #-----------------------------------------------------------------------------
-RESULT_TSV="${WORKDIR}/${SAMPLE}_polysolver.txt"
+RESULT_TSV="${WORK_BASE}/${SAMPLE}_polysolver.txt"
 
 python3 "${PIPELINE_BIN}/parse_polysolver_results.py" \
-    --input "$WINNERS" \
+    --input "$SCRATCH_WINNERS" \
     --sample "$SAMPLE" \
     --output "$RESULT_TSV" \
     || { echo "ERROR: parse_polysolver_results.py failed"; exit 1; }
@@ -325,6 +335,9 @@ DST="${RESULTS_DIR}/by_tool/polysolver/${SAMPLE}_polysolver.txt"
 [[ -e "$DST" ]] && rm -f "$DST"
 ln -sf "$SRC" "$DST"
 echo "[OK] Symlinked: ${DST}"
+
+# Clean up scratch winners backup (result already published above)
+rm -f "$SCRATCH_WINNERS"
 
 echo ""
 echo "=== Done: ${SAMPLE} ==="
