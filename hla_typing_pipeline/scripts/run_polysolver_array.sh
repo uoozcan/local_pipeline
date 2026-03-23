@@ -120,7 +120,7 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
         --time=04:00:00 \
         --cpus-per-task=4 \
         --mem=8G \
-        --array="1-${N}" \
+        --array="1-${N}%20" \
         --output="${LOGS_DIR}/polysolver_%A_%a.out" \
         --error="${LOGS_DIR}/polysolver_%A_%a.err" \
         "$0"
