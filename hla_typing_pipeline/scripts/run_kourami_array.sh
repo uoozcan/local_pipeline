@@ -38,10 +38,11 @@ FASTQ_DIR="${BASE}/1kgp_fastqs"
 RESULTS_DIR="${BASE}/1kgp_typing_results"
 LOGS_DIR="${BASE}/logs"
 WORK_BASE="${BASE}/kourami_work"
-HLA_TOOLS="/scratch/${PROJECT_ID}/hla_tools"
 PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline/hla_typing_pipeline/bin"
-KOURAMI_JAR="${HLA_TOOLS}/kourami/kourami-0.9.6/build/Kourami.jar"
-KOURAMI_DB="${HLA_TOOLS}/kourami/kourami_db"
+KOURAMI_SIF="/scratch/${PROJECT_ID}/hla_references/singularity_cache/containers/kourami.sif"
+# JAR and DB are bundled inside the zlskidmore/kourami container
+KOURAMI_JAR="/usr/local/bin/Kourami.jar"
+KOURAMI_DB="/usr/local/bin/kourami-0.9.6/db"
 HLA_REGION_NOPREFIX="6:28000000-34000000"    # hs37d5 uses no "chr" prefix
 HLA_REGION_CHR="chr6:28000000-34000000"      # hg38 uses "chr" prefix
 
@@ -154,10 +155,10 @@ FASTQ_DIR="${BASE}/1kgp_fastqs"
 RESULTS_DIR="${BASE}/1kgp_typing_results"
 LOGS_DIR="${BASE}/logs"
 WORK_BASE="${BASE}/kourami_work"
-HLA_TOOLS="/scratch/${PROJECT_ID}/hla_tools"
 PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline/hla_typing_pipeline/bin"
-KOURAMI_JAR="${HLA_TOOLS}/kourami/kourami-0.9.6/build/Kourami.jar"
-KOURAMI_DB="${HLA_TOOLS}/kourami/kourami_db"
+KOURAMI_SIF="/scratch/${PROJECT_ID}/hla_references/singularity_cache/containers/kourami.sif"
+KOURAMI_JAR="/usr/local/bin/Kourami.jar"
+KOURAMI_DB="/usr/local/bin/kourami-0.9.6/db"
 HLA_REGION_NOPREFIX="6:28000000-34000000"
 HLA_REGION_CHR="chr6:28000000-34000000"
 SAMPLE_LIST_FILE="${BASE}/conf/kourami_batch.txt"
@@ -186,16 +187,17 @@ echo "Date: $(date)"
 
 #-----------------------------------------------------------------------------
 # Load modules
+# NOTE: bwa and java come from the kourami.sif container; only samtools is
+# loaded from modules (container does not include samtools)
 #-----------------------------------------------------------------------------
 module purge
 module load gcc
 module load samtools/1.21
-module load bwa
-module load java/11
 
-echo "samtools: $(samtools --version | head -1)"
-echo "bwa:      $(bwa 2>&1 | head -1 || true)"
-echo "java:     $(java -version 2>&1 | head -1)"
+echo "samtools:    $(samtools --version | head -1)"
+echo "singularity: $(singularity --version 2>/dev/null || apptainer --version 2>/dev/null || echo 'check path')"
+echo "bwa (container):  $(singularity exec "$KOURAMI_SIF" bwa 2>&1 | head -1 || true)"
+echo "java (container): $(singularity exec "$KOURAMI_SIF" java -version 2>&1 | head -1 || true)"
 
 #-----------------------------------------------------------------------------
 # Step 1: Create workdir; get HLA region FASTQ
@@ -270,32 +272,36 @@ else
 fi
 
 #-----------------------------------------------------------------------------
-# Step 2: Align HLA reads to Kourami panel
+# Step 2: Align HLA reads to Kourami panel (bwa inside container)
 #-----------------------------------------------------------------------------
 echo "[Step 2] Aligning to Kourami panel..."
 
-bwa mem -t "${SLURM_CPUS_PER_TASK}" \
-    "${KOURAMI_DB}/All_FINAL_with_Decoy.fa.gz" \
-    "$R1" "$R2" \
-    -o "${SAMPLE}.panel.sam" \
-    2>"${LOGS_DIR}/kourami_bwa_${SAMPLE}.log"
+singularity exec \
+    --bind "${WORKDIR}:${WORKDIR}" \
+    --bind "${FASTQ_DIR}:${FASTQ_DIR}" \
+    "$KOURAMI_SIF" \
+    bwa mem -t "${SLURM_CPUS_PER_TASK}" \
+        "${KOURAMI_DB}/All_FINAL_with_Decoy.fa.gz" \
+        "$R1" "$R2" \
+    2>"${LOGS_DIR}/kourami_bwa_${SAMPLE}.log" \
+    | samtools sort -@ "${SLURM_CPUS_PER_TASK}" \
+        -o "${SAMPLE}.panel.bam"
 
-samtools sort -@ "${SLURM_CPUS_PER_TASK}" \
-    -o "${SAMPLE}.panel.bam" "${SAMPLE}.panel.sam"
 samtools index "${SAMPLE}.panel.bam"
-rm -f "${SAMPLE}.panel.sam"
-
 echo "[OK] Panel BAM: $(du -sh ${SAMPLE}.panel.bam | cut -f1)"
 
 #-----------------------------------------------------------------------------
-# Step 3: Kourami assembly-graph typing
+# Step 3: Kourami assembly-graph typing (java inside container)
 #-----------------------------------------------------------------------------
 echo "[Step 3] Running Kourami..."
 
-java -Xmx12g -jar "$KOURAMI_JAR" \
-    -d "$KOURAMI_DB" \
-    "${SAMPLE}.panel.bam" \
-    -o "${SAMPLE}.kourami" \
+singularity exec \
+    --bind "${WORKDIR}:${WORKDIR}" \
+    "$KOURAMI_SIF" \
+    java -Xmx12g -jar "$KOURAMI_JAR" \
+        -d "$KOURAMI_DB" \
+        "${SAMPLE}.panel.bam" \
+        -o "${SAMPLE}.kourami" \
     2>"${LOGS_DIR}/kourami_run_${SAMPLE}.log" \
     || true   # Kourami can exit non-zero if a gene fails
 
