@@ -83,44 +83,51 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
     done
     echo "[INFO] Removed ${CLEANED} blank/invalid POLYSOLVER result(s)"
 
-    # Discover samples typed by any other tool
+    # polysolver_pending.txt persists between runs — only rebuilt when absent or --refresh passed.
+    # After each batch is submitted, the batch samples are removed from this file so the next
+    # run automatically picks up the next N samples (not the same ones again).
     SAMPLE_LIST_FILE="${BASE}/conf/polysolver_pending.txt"
+    BATCH_LIST_FILE="${BASE}/conf/polysolver_batch.txt"
     mkdir -p "${BASE}/conf"
-    : > "$SAMPLE_LIST_FILE"
 
-    for TOOL in hlahd optitype arcashla spechla; do
-        for F in "${RESULTS_DIR}"/*/; do
-            SAMPLE=$(basename "$F")
-            RESULT="${RESULTS_DIR}/${SAMPLE}/${TOOL}/${SAMPLE}_${TOOL}.txt"
-            [[ -f "$RESULT" ]] || continue
-            # Skip if POLYSOLVER already done
-            DONE="${RESULTS_DIR}/by_tool/polysolver/${SAMPLE}_polysolver.txt"
-            if [[ -s "$DONE" ]] && grep -qP '^[ABC]\t|^Gene\t' "$DONE" 2>/dev/null; then
-                continue
-            fi
-            echo "$SAMPLE"
-        done
-    done | sort -u >> "$SAMPLE_LIST_FILE"
+    if [[ ! -f "$SAMPLE_LIST_FILE" ]] || [[ "${1:-}" == "--refresh" ]]; then
+        echo "[INFO] Building pending sample list..."
+        : > "$SAMPLE_LIST_FILE"
+        for TOOL in hlahd optitype arcashla spechla; do
+            for F in "${RESULTS_DIR}"/*/; do
+                SAMPLE=$(basename "$F")
+                RESULT="${RESULTS_DIR}/${SAMPLE}/${TOOL}/${SAMPLE}_${TOOL}.txt"
+                [[ -f "$RESULT" ]] || continue
+                DONE="${RESULTS_DIR}/by_tool/polysolver/${SAMPLE}_polysolver.txt"
+                if [[ -s "$DONE" ]] && grep -qP '^[ABC]\t|^Gene\t' "$DONE" 2>/dev/null; then
+                    continue
+                fi
+                echo "$SAMPLE"
+            done
+        done | sort -u >> "$SAMPLE_LIST_FILE"
+    fi
 
     N_TOTAL=$(wc -l < "$SAMPLE_LIST_FILE")
 
     if [[ "$N_TOTAL" -eq 0 ]]; then
-        echo "[INFO] All samples already have POLYSOLVER results. Nothing to do."
+        echo "[INFO] All samples done. Run with --refresh to rescan for any failures."
+        rm -f "$SAMPLE_LIST_FILE"
         exit 0
     fi
 
-    # Limit to first BATCH_SIZE samples per run to control scratch file quota.
-    # Re-run this script after each batch completes to process the next batch.
+    # Take first BATCH_SIZE samples and remove them from the pending list immediately
+    # so the next run picks the next batch (not the same ones).
     BATCH_SIZE="${POLYSOLVER_BATCH_SIZE:-20}"
     N=$(( N_TOTAL < BATCH_SIZE ? N_TOTAL : BATCH_SIZE ))
 
-    echo "[INFO] Samples pending: ${N_TOTAL} — submitting batch of ${N} (set POLYSOLVER_BATCH_SIZE to change)"
-    head -"$N" "$SAMPLE_LIST_FILE"
-    echo ""
-
-    # Write batch-only list so array tasks read the right samples
-    BATCH_LIST_FILE="${BASE}/conf/polysolver_batch.txt"
     head -"$N" "$SAMPLE_LIST_FILE" > "$BATCH_LIST_FILE"
+    tail -n +"$(( N + 1 ))" "$SAMPLE_LIST_FILE" > "${SAMPLE_LIST_FILE}.tmp"
+    mv "${SAMPLE_LIST_FILE}.tmp" "$SAMPLE_LIST_FILE"
+
+    N_REMAINING=$(wc -l < "$SAMPLE_LIST_FILE")
+    echo "[INFO] Submitting batch of ${N} — ${N_REMAINING} samples remain for future batches"
+    cat "$BATCH_LIST_FILE"
+    echo ""
 
     sbatch \
         --job-name=polysolver_1kgp \
@@ -135,7 +142,11 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
         "$0"
 
     echo "[INFO] Array job submitted. Monitor with: squeue -u \$USER"
-    echo "[INFO] Re-run this script after the batch completes to process the next ${BATCH_SIZE} samples."
+    if [[ "$N_REMAINING" -gt 0 ]]; then
+        echo "[INFO] Re-run after this batch completes to submit the next ${BATCH_SIZE} samples (${N_REMAINING} remaining)."
+    else
+        echo "[INFO] This is the last batch. Run with --refresh after completion to check for failures."
+    fi
     exit 0
 fi
 
