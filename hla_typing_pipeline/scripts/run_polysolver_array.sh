@@ -276,8 +276,10 @@ echo "---"
 
 # Check for winners file
 WINNERS="${POLY_OUT}/winners.hla.nofreq.txt"
+# include_freq=1 produces winners.hla.txt instead of winners.hla.nofreq.txt
+[[ -f "$WINNERS" ]] || WINNERS="${POLY_OUT}/winners.hla.txt"
 if [[ ! -f "$WINNERS" ]]; then
-    echo "ERROR: winners.hla.nofreq.txt not found in ${POLY_OUT}"
+    echo "ERROR: neither winners.hla.nofreq.txt nor winners.hla.txt found in ${POLY_OUT}"
     echo "Directory contents:"
     ls -la "$POLY_OUT" 2>/dev/null || echo "(empty)"
     exit 1
