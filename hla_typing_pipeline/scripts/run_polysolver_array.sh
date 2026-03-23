@@ -102,16 +102,25 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
         done
     done | sort -u >> "$SAMPLE_LIST_FILE"
 
-    N=$(wc -l < "$SAMPLE_LIST_FILE")
+    N_TOTAL=$(wc -l < "$SAMPLE_LIST_FILE")
 
-    if [[ "$N" -eq 0 ]]; then
+    if [[ "$N_TOTAL" -eq 0 ]]; then
         echo "[INFO] All samples already have POLYSOLVER results. Nothing to do."
         exit 0
     fi
 
-    echo "[INFO] Samples to run: $N"
-    cat "$SAMPLE_LIST_FILE"
+    # Limit to first BATCH_SIZE samples per run to control scratch file quota.
+    # Re-run this script after each batch completes to process the next batch.
+    BATCH_SIZE="${POLYSOLVER_BATCH_SIZE:-20}"
+    N=$(( N_TOTAL < BATCH_SIZE ? N_TOTAL : BATCH_SIZE ))
+
+    echo "[INFO] Samples pending: ${N_TOTAL} — submitting batch of ${N} (set POLYSOLVER_BATCH_SIZE to change)"
+    head -"$N" "$SAMPLE_LIST_FILE"
     echo ""
+
+    # Write batch-only list so array tasks read the right samples
+    BATCH_LIST_FILE="${BASE}/conf/polysolver_batch.txt"
+    head -"$N" "$SAMPLE_LIST_FILE" > "$BATCH_LIST_FILE"
 
     sbatch \
         --job-name=polysolver_1kgp \
@@ -120,12 +129,13 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
         --time=04:00:00 \
         --cpus-per-task=4 \
         --mem=8G \
-        --array="1-${N}%20" \
+        --array="1-${N}" \
         --output="${LOGS_DIR}/polysolver_%A_%a.out" \
         --error="${LOGS_DIR}/polysolver_%A_%a.err" \
         "$0"
 
     echo "[INFO] Array job submitted. Monitor with: squeue -u \$USER"
+    echo "[INFO] Re-run this script after the batch completes to process the next ${BATCH_SIZE} samples."
     exit 0
 fi
 
@@ -145,7 +155,7 @@ POLYSOLVER_SIF="/scratch/${PROJECT_ID}/hla_references/singularity_cache/containe
 POLYSOLVER_BUILD="hg19"
 HLA_REGION="6:28000000-34000000"
 HG19_REF="/scratch/${PROJECT_ID}/references/hs37d5.fa"
-SAMPLE_LIST_FILE="${BASE}/conf/polysolver_pending.txt"
+SAMPLE_LIST_FILE="${BASE}/conf/polysolver_batch.txt"
 
 declare -A CRAM_ERR=(
     [NA19238]=ERR3239453
