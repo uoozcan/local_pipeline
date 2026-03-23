@@ -1,0 +1,98 @@
+{
+  "method": "equal_placeholder",
+  "resolution": "2-field",
+  "data_type": "longreads_hifi",
+  "n_samples": 0,
+  "description": "PLACEHOLDER — equal weights across tools capable of long-read HiFi typing. HiFiHLA (PacBio official) is not yet integrated; HLA-HD v1.4+ accepts long reads and is the primary recommended tool for PacBio CCS/HiFi data. Short-read tools (OptiType, seq2HLA, polysolver, kourami) are excluded. Replace by running HiFi samples through supported tools then: python bin/calibrate_tool_weights.py calibrate --data-type longreads_hifi --output-weights conf/tool_weights_hifi.json",
+  "genes": {
+    "A": {
+      "hlahd":     1.0,
+      "spechla":   0.0,
+      "arcashla":  0.0,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "B": {
+      "hlahd":     1.0,
+      "spechla":   0.0,
+      "arcashla":  0.0,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "C": {
+      "hlahd":     1.0,
+      "spechla":   0.0,
+      "arcashla":  0.0,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DRB1": {
+      "hlahd":     1.0,
+      "spechla":   0.0,
+      "arcashla":  0.0,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DQA1": {
+      "hlahd":     1.0,
+      "spechla":   0.0,
+      "arcashla":  0.0,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DQB1": {
+      "hlahd":     1.0,
+      "spechla":   0.0,
+      "arcashla":  0.0,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DPA1": {
+      "hlahd":     1.0,
+      "spechla":   0.0,
+      "arcashla":  0.0,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DPB1": {
+      "hlahd":     1.0,
+      "spechla":   0.0,
+      "arcashla":  0.0,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    }
+  },
+  "raw_accuracy": {}
+}

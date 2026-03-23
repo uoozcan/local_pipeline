@@ -1,18 +1,98 @@
 {
-  "method": "equal_placeholder",
+  "method": "literature_informed_placeholder",
   "resolution": "2-field",
   "data_type": "rna",
   "n_samples": 0,
-  "description": "PLACEHOLDER — equal weights until empirical calibration is run. Replace by running: python bin/calibrate_tool_weights.py calibrate --ground-truth 1kgp_hla_gt.tsv --results-dir /path/to/1kgp_results/ --data-type rna --output-weights conf/tool_weights_rna.json --output-table conf/tool_accuracy_rna.tsv",
+  "description": "PLACEHOLDER — literature-informed starting weights for RNA-seq data. seq2HLA and arcasHLA are optimised for RNA-seq; OptiType also performs well on RNA. DNA-optimised tools (HLA-HD, SpecHLA, HLA*LA, polysolver, kourami, xHLA) are excluded (weight=0) as they require genomic reads. Class II weights based on T1K/seq2HLA literature (T1K et al. 2023; Choudhary et al. 2013). Replace by running GEUVADIS samples through seq2HLA/arcasHLA/optitype then: python bin/calibrate_tool_weights.py calibrate --ground-truth 1kgp_hla_gt.tsv --results-dir /path/to/geuvadis_results/ --data-type rna --output-weights conf/tool_weights_rna.json --output-table conf/tool_accuracy_rna.tsv",
   "genes": {
-    "A":    {"hlahd": 0.000, "spechla": 0.000, "arcashla": 0.333, "hlala": 0.000, "optitype": 0.333, "xhla": 0.333},
-    "B":    {"hlahd": 0.000, "spechla": 0.000, "arcashla": 0.333, "hlala": 0.000, "optitype": 0.333, "xhla": 0.333},
-    "C":    {"hlahd": 0.000, "spechla": 0.000, "arcashla": 0.333, "hlala": 0.000, "optitype": 0.333, "xhla": 0.333},
-    "DRB1": {"hlahd": 0.000, "spechla": 0.000, "arcashla": 0.500, "hlala": 0.000, "optitype": 0.000, "xhla": 0.500},
-    "DQA1": {"hlahd": 0.000, "spechla": 0.000, "arcashla": 1.000, "hlala": 0.000, "optitype": 0.000, "xhla": 0.000},
-    "DQB1": {"hlahd": 0.000, "spechla": 0.000, "arcashla": 0.500, "hlala": 0.000, "optitype": 0.000, "xhla": 0.500},
-    "DPA1": {"hlahd": 0.000, "spechla": 0.000, "arcashla": 1.000, "hlala": 0.000, "optitype": 0.000, "xhla": 0.000},
-    "DPB1": {"hlahd": 0.000, "spechla": 0.000, "arcashla": 0.500, "hlala": 0.000, "optitype": 0.000, "xhla": 0.500}
+    "A": {
+      "hlahd":     0.0,
+      "spechla":   0.0,
+      "arcashla":  0.35,
+      "optitype":  0.25,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.40,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "B": {
+      "hlahd":     0.0,
+      "spechla":   0.0,
+      "arcashla":  0.35,
+      "optitype":  0.25,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.40,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "C": {
+      "hlahd":     0.0,
+      "spechla":   0.0,
+      "arcashla":  0.35,
+      "optitype":  0.25,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.40,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DRB1": {
+      "hlahd":     0.0,
+      "spechla":   0.0,
+      "arcashla":  0.60,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.40,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DQA1": {
+      "hlahd":     0.0,
+      "spechla":   0.0,
+      "arcashla":  0.60,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.40,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DQB1": {
+      "hlahd":     0.0,
+      "spechla":   0.0,
+      "arcashla":  0.60,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.40,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DPA1": {
+      "hlahd":     0.0,
+      "spechla":   0.0,
+      "arcashla":  0.60,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.40,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DPB1": {
+      "hlahd":     0.0,
+      "spechla":   0.0,
+      "arcashla":  0.60,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.40,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    }
   },
   "raw_accuracy": {}
 }

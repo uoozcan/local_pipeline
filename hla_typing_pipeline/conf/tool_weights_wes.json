@@ -1,0 +1,98 @@
+{
+  "method": "normalized_concordance",
+  "resolution": "2-field",
+  "data_type": "wes",
+  "n_samples": 0,
+  "description": "PLACEHOLDER — initialised from WGS (30x) calibration weights. WES shares Class-I characteristics with WGS but typically has lower off-target (intronic) read depth; Class-II performance may differ. New tools (seq2hla, polysolver, kourami) set to 0 until WES-specific calibration is run. Replace by running: python bin/calibrate_tool_weights.py calibrate --ground-truth 1kgp_hla_gt.tsv --results-dir /path/to/wes_results/ --data-type wes --output-weights conf/tool_weights_wes.json --output-table conf/tool_accuracy_wes.tsv",
+  "genes": {
+    "A": {
+      "hlahd":     0.4091,
+      "spechla":   0.0909,
+      "arcashla":  0.0,
+      "optitype":  0.5,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "B": {
+      "hlahd":     0.119,
+      "spechla":   0.0476,
+      "arcashla":  0.0714,
+      "optitype":  0.3571,
+      "hlala":     0.0,
+      "xhla":      0.4048,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "C": {
+      "hlahd":     0.0833,
+      "spechla":   0.25,
+      "arcashla":  0.0833,
+      "optitype":  0.5833,
+      "hlala":     0.0,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DRB1": {
+      "hlahd":     0.275,
+      "spechla":   0.175,
+      "arcashla":  0.125,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.425,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DQA1": {
+      "hlahd":     0.25,
+      "spechla":   0.25,
+      "arcashla":  0.25,
+      "optitype":  0.0,
+      "hlala":     0.25,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DQB1": {
+      "hlahd":     0.2564,
+      "spechla":   0.2564,
+      "arcashla":  0.0513,
+      "optitype":  0.0,
+      "hlala":     0.0,
+      "xhla":      0.4359,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DPA1": {
+      "hlahd":     0.25,
+      "spechla":   0.25,
+      "arcashla":  0.25,
+      "optitype":  0.0,
+      "hlala":     0.25,
+      "xhla":      0.0,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    },
+    "DPB1": {
+      "hlahd":     0.2,
+      "spechla":   0.2,
+      "arcashla":  0.2,
+      "optitype":  0.0,
+      "hlala":     0.2,
+      "xhla":      0.2,
+      "seq2hla":   0.0,
+      "polysolver": 0.0,
+      "kourami":   0.0
+    }
+  },
+  "raw_accuracy": {}
+}

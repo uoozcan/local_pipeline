@@ -33,9 +33,16 @@ process CONSENSUS {
     def weighting      = params.weighting ?: 'read_confidence'
     def output_format  = params.output_format ?: 'text'
 
-    // calibrated weighting needs the weights JSON and data-type flag
-    def weights_arg = (params.weighting == 'calibrated' && params.weights_file)
-        ? "--weights-file ${params.weights_file} --data-type ${params.seq_type ?: 'wgs'}"
+    // calibrated weighting: auto-select weights file by seq_type if not explicitly set
+    def resolvedWeightsFile = params.weights_file
+    if (params.weighting == 'calibrated' && !params.weights_file) {
+        def dtMap = [dna: 'wgs', wes: 'wes', rna: 'rna',
+                     longreads_hifi: 'hifi', longreads_ont: 'ont']
+        def dtLabel = dtMap[params.seq_type] ?: 'wgs'
+        resolvedWeightsFile = "${projectDir}/conf/tool_weights_${dtLabel}.json"
+    }
+    def weights_arg = (params.weighting == 'calibrated' && resolvedWeightsFile)
+        ? "--weights-file ${resolvedWeightsFile} --data-type ${params.seq_type ?: 'dna'}"
         : ''
 
     // gl_string output path arg (passed to consensus_voting.py)
