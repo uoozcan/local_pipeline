@@ -31,8 +31,8 @@ RESULTS_DIR="${BASE}/1kgp_typing_results"
 LOGS_DIR="${BASE}/logs"
 WORK_BASE="${BASE}/seq2hla_work"
 HLA_TOOLS="/scratch/${PROJECT_ID}/hla_tools"
-PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline_fresh/hla_typing_pipeline/bin"
-SEQ2HLA_SIF="${HLA_TOOLS}/containers/seq2hla.sif"
+PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline/hla_typing_pipeline/bin"
+SEQ2HLA_SIF="/scratch/${PROJECT_ID}/hla_references/singularity_cache/containers/seq2hla.sif"
 HLA_REGION="chr6:28000000-34000000"
 
 # CRAM accessions (fallback when FASTQ is missing)
@@ -69,34 +69,45 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
     done
     echo "[INFO] Removed ${CLEANED} blank/invalid seq2HLA result(s)"
 
-    # Discover samples typed by any other tool
     SAMPLE_LIST_FILE="${BASE}/conf/seq2hla_pending.txt"
+    BATCH_LIST_FILE="${BASE}/conf/seq2hla_batch.txt"
     mkdir -p "${BASE}/conf"
-    : > "$SAMPLE_LIST_FILE"
 
-    for TOOL in hlahd optitype arcashla spechla; do
-        for F in "${RESULTS_DIR}"/*/; do
-            SAMPLE=$(basename "$F")
-            RESULT="${RESULTS_DIR}/${SAMPLE}/${TOOL}/${SAMPLE}_${TOOL}.txt"
-            [[ -f "$RESULT" ]] || continue
-            # Skip if seq2HLA already done (has actual allele calls)
-            DONE="${RESULTS_DIR}/by_tool/seq2hla/${SAMPLE}_seq2hla.txt"
-            if [[ -s "$DONE" ]] && grep -qP 'HLA[*:]' "$DONE" 2>/dev/null; then
-                continue
-            fi
-            echo "$SAMPLE"
-        done
-    done | sort -u >> "$SAMPLE_LIST_FILE"
+    if [[ ! -f "$SAMPLE_LIST_FILE" ]] || [[ "${1:-}" == "--refresh" ]]; then
+        echo "[INFO] Building pending sample list..."
+        : > "$SAMPLE_LIST_FILE"
+        for TOOL in hlahd optitype arcashla spechla; do
+            for F in "${RESULTS_DIR}"/*/; do
+                SAMPLE=$(basename "$F")
+                RESULT="${RESULTS_DIR}/${SAMPLE}/${TOOL}/${SAMPLE}_${TOOL}.txt"
+                [[ -f "$RESULT" ]] || continue
+                DONE="${RESULTS_DIR}/by_tool/seq2hla/${SAMPLE}_seq2hla.txt"
+                if [[ -s "$DONE" ]] && grep -qP 'HLA[*:]' "$DONE" 2>/dev/null; then
+                    continue
+                fi
+                echo "$SAMPLE"
+            done
+        done | sort -u >> "$SAMPLE_LIST_FILE"
+    fi
 
-    N=$(wc -l < "$SAMPLE_LIST_FILE")
+    N_TOTAL=$(wc -l < "$SAMPLE_LIST_FILE")
 
-    if [[ "$N" -eq 0 ]]; then
-        echo "[INFO] All samples already have seq2HLA results. Nothing to do."
+    if [[ "$N_TOTAL" -eq 0 ]]; then
+        echo "[INFO] All samples done. Run with --refresh to rescan for any failures."
+        rm -f "$SAMPLE_LIST_FILE"
         exit 0
     fi
 
-    echo "[INFO] Samples to run: $N"
-    cat "$SAMPLE_LIST_FILE"
+    BATCH_SIZE="${SEQ2HLA_BATCH_SIZE:-20}"
+    N=$(( N_TOTAL < BATCH_SIZE ? N_TOTAL : BATCH_SIZE ))
+
+    head -"$N" "$SAMPLE_LIST_FILE" > "$BATCH_LIST_FILE"
+    tail -n +"$(( N + 1 ))" "$SAMPLE_LIST_FILE" > "${SAMPLE_LIST_FILE}.tmp"
+    mv "${SAMPLE_LIST_FILE}.tmp" "$SAMPLE_LIST_FILE"
+
+    N_REMAINING=$(wc -l < "$SAMPLE_LIST_FILE")
+    echo "[INFO] Submitting batch of ${N} — ${N_REMAINING} samples remain for future batches"
+    cat "$BATCH_LIST_FILE"
     echo ""
 
     sbatch \
@@ -112,6 +123,11 @@ if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
         "$0"
 
     echo "[INFO] Array job submitted. Monitor with: squeue -u \$USER"
+    if [[ "$N_REMAINING" -gt 0 ]]; then
+        echo "[INFO] Re-run after this batch completes to submit the next ${BATCH_SIZE} samples (${N_REMAINING} remaining)."
+    else
+        echo "[INFO] This is the last batch. Run with --refresh after completion to check for failures."
+    fi
     exit 0
 fi
 
@@ -125,11 +141,10 @@ FASTQ_DIR="${BASE}/1kgp_fastqs"
 RESULTS_DIR="${BASE}/1kgp_typing_results"
 LOGS_DIR="${BASE}/logs"
 WORK_BASE="${BASE}/seq2hla_work"
-HLA_TOOLS="/scratch/${PROJECT_ID}/hla_tools"
-PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline_fresh/hla_typing_pipeline/bin"
-SEQ2HLA_SIF="${HLA_TOOLS}/containers/seq2hla.sif"
+PIPELINE_BIN="/scratch/${PROJECT_ID}/ozcanumu/new_pipeline_2/hla_typing_pipeline/hla_typing_pipeline/bin"
+SEQ2HLA_SIF="/scratch/${PROJECT_ID}/hla_references/singularity_cache/containers/seq2hla.sif"
 HLA_REGION="chr6:28000000-34000000"
-SAMPLE_LIST_FILE="${BASE}/conf/seq2hla_pending.txt"
+SAMPLE_LIST_FILE="${BASE}/conf/seq2hla_batch.txt"
 
 declare -A CRAM_ERR=(
     [NA19238]=ERR3239453
@@ -159,7 +174,7 @@ echo "Date: $(date)"
 module purge
 module load gcc
 module load samtools/1.21
-module load singularity
+# NOTE: singularity/apptainer is a system command on Puhti — no module needed
 
 #-----------------------------------------------------------------------------
 # Step 1: Ensure R1/R2 FASTQs exist
