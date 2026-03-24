@@ -234,7 +234,12 @@ echo "[Step 2] Running seq2HLA..."
 cd "$WORKDIR"
 
 # seq2HLA writes output files relative to cwd; -r sets the prefix
-singularity exec "$SEQ2HLA_SIF" \
+# Explicit bind mounts required — Puhti Apptainer auto-bind does not reliably
+# expose Lustre scratch paths inside the seq2HLA container.
+singularity exec \
+    --bind "${FASTQ_DIR}:${FASTQ_DIR}" \
+    --bind "${WORKDIR}:${WORKDIR}" \
+    "$SEQ2HLA_SIF" \
     seq2HLA \
         -r "${SAMPLE}." \
         -p "${SLURM_CPUS_PER_TASK}" \
