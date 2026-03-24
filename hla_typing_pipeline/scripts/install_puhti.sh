@@ -360,7 +360,68 @@ REQEOF
         info "Skipping HiFi-HLA container (pass --include-longreads to install it)"
     fi
 
+    # 12. Kourami container (assembly-graph HLA typing, Class I + DRB1/DQA1)
+    if [[ ! -f "${CONTAINER_DIR}/kourami.sif" ]]; then
+        log "Pulling Kourami container (~1.5 GB)..."
+        singularity pull "${CONTAINER_DIR}/kourami.sif" \
+            docker://zlskidmore/kourami 2>&1 \
+            && ok "kourami.sif pulled" \
+            || warn "Kourami pull failed — only needed for kourami typing"
+    else
+        info "Kourami container already exists"
+    fi
+
+    # 13. POLYSOLVER container (hg19-only BAM typing)
+    if [[ ! -f "${CONTAINER_DIR}/polysolver.sif" ]]; then
+        log "Pulling POLYSOLVER container (~500 MB)..."
+        singularity pull "${CONTAINER_DIR}/polysolver.sif" \
+            docker://sachet/polysolver:v4 2>&1 \
+            && ok "polysolver.sif pulled" \
+            || warn "POLYSOLVER pull failed — only needed for polysolver typing (hg19 only)"
+    else
+        info "POLYSOLVER container already exists"
+    fi
+
+    # 14. seq2HLA container (RNA-seq HLA typing, Python 2.7)
+    if [[ ! -f "${CONTAINER_DIR}/seq2hla.sif" ]]; then
+        log "Pulling seq2HLA container (~700 MB)..."
+        singularity pull "${CONTAINER_DIR}/seq2hla.sif" \
+            docker://quay.io/biocontainers/seq2hla:2.3--hdfd78af_0 2>&1 \
+            && ok "seq2hla.sif pulled" \
+            || warn "seq2HLA pull failed — only needed for seq2hla typing"
+    else
+        info "seq2HLA container already exists"
+    fi
+
     info "Container setup complete"
+fi
+
+#-----------------------------------------------------------------------------
+# Download Kourami HLA Panel Database
+#-----------------------------------------------------------------------------
+KOURAMI_DB_DIR="/scratch/${PROJECT_ID}/hla_tools/kourami_db"
+if [[ ! -f "${KOURAMI_DB_DIR}/All_FINAL_with_Decoy.fa.gz" ]]; then
+    if [[ -f "${CONTAINER_DIR}/kourami.sif" ]]; then
+        log "Downloading Kourami HLA panel database (~1.5 GB)..."
+        mkdir -p "${KOURAMI_DB_DIR}"
+        singularity exec "${CONTAINER_DIR}/kourami.sif" \
+            bash /usr/local/bin/kourami-0.9.6/scripts/download_panel.sh \
+            "${KOURAMI_DB_DIR}" 2>&1 \
+            && ok "Kourami DB downloaded to ${KOURAMI_DB_DIR}" \
+            || warn "Kourami DB download failed — run manually before using kourami tool"
+        # BWA index the panel
+        if [[ -f "${KOURAMI_DB_DIR}/All_FINAL_with_Decoy.fa.gz" ]]; then
+            log "Indexing Kourami panel with BWA..."
+            module load bwa 2>/dev/null || true
+            bwa index "${KOURAMI_DB_DIR}/All_FINAL_with_Decoy.fa.gz" 2>&1 \
+                && ok "Kourami panel indexed" \
+                || warn "BWA index failed — index manually: bwa index ${KOURAMI_DB_DIR}/All_FINAL_with_Decoy.fa.gz"
+        fi
+    else
+        warn "Kourami container not found — skipping DB download"
+    fi
+else
+    info "Kourami DB already exists at ${KOURAMI_DB_DIR}"
 fi
 
 #-----------------------------------------------------------------------------
@@ -566,13 +627,21 @@ else
 fi
 
 # Check containers
-for container in arcashla hlahd optitype fastqc xhla hlala bamqc flow_optitype spechla_with_spechap hla_postprocess; do
+for container in arcashla hlahd optitype fastqc xhla hlala bamqc flow_optitype spechla_with_spechap hla_postprocess kourami polysolver seq2hla; do
     if [[ -f "${CONTAINER_DIR}/${container}.sif" ]]; then
         echo -e "${GREEN}[OK]${NC} Container: ${container}.sif"
     else
         echo -e "${YELLOW}[WARN]${NC} Container missing: ${container}.sif"
     fi
 done
+
+# Check Kourami DB
+KOURAMI_DB_DIR="/scratch/${PROJECT_ID}/hla_tools/kourami_db"
+if [[ -f "${KOURAMI_DB_DIR}/All_FINAL_with_Decoy.fa.gz" ]]; then
+    echo -e "${GREEN}[OK]${NC} Kourami HLA panel DB"
+else
+    echo -e "${YELLOW}[WARN]${NC} Kourami DB missing: ${KOURAMI_DB_DIR}/All_FINAL_with_Decoy.fa.gz"
+fi
 
 # Check configuration
 if [[ -f "${INSTALL_DIR}/pipeline/conf/user.config" ]]; then

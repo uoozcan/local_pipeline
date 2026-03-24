@@ -131,11 +131,13 @@ echo ""
 # Load modules
 module purge
 module load nextflow/23.10.0 2>/dev/null || module load nextflow
-module load singularity 2>/dev/null || true
+module load apptainer 2>/dev/null || module load singularity 2>/dev/null || true
 
-# Set Singularity cache
+# Set container runtime cache (Apptainer replaced Singularity on Puhti)
 export SINGULARITY_CACHEDIR="${BASE_DIR}/singularity_cache"
 export NXF_SINGULARITY_CACHEDIR="$SINGULARITY_CACHEDIR"
+export APPTAINER_CACHEDIR="$SINGULARITY_CACHEDIR"
+export NXF_APPTAINER_CACHEDIR="$SINGULARITY_CACHEDIR"
 mkdir -p "$SINGULARITY_CACHEDIR"
 
 # Create output and log directories
@@ -210,7 +212,7 @@ nextflow run "${PIPELINE_DIR}/main.nf" \
     --seq_type "$SEQ_TYPE" \
     --max_cpus ${SLURM_CPUS_PER_TASK:-40} \
     --max_memory "${SLURM_MEM_PER_NODE:-180000}M" \
-    -profile singularity \
+    -profile apptainer \
     -c "${PIPELINE_DIR}/conf/puhti.config" \
     -resume \
     $EXTRA_ARGS
