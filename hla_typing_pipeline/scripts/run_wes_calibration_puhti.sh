@@ -86,7 +86,7 @@ done
 # Derived paths
 #-----------------------------------------------------------------------------
 SCRATCH_BASE="/scratch/${PROJECT_ID}/hla_calibration/wes"
-FASTQ_DIR="${SCRATCH_BASE}/fastqs"
+BAM_DIR="${SCRATCH_BASE}/bams"
 RESULTS_DIR="${SCRATCH_BASE}/results"
 BY_TOOL_DIR="${RESULTS_DIR}/by_tool"
 INDEX_DIR="${SCRATCH_BASE}/index"
@@ -105,17 +105,17 @@ TABLE_OUT="${INSTALL_DIR}/conf/tool_accuracy_wes_v1.tsv"
 EFFECTIVE_LIST="${SCRATCH_BASE}/wes_samples_effective.txt"
 ALL_SAMPLES_LIST="${SCRATCH_BASE}/wes_samples_all.txt"
 
-mkdir -p "${SCRATCH_BASE}" "${FASTQ_DIR}" "${RESULTS_DIR}" "${INDEX_DIR}" "${LOGS_DIR}"
+mkdir -p "${SCRATCH_BASE}" "${BAM_DIR}" "${RESULTS_DIR}" "${INDEX_DIR}" "${LOGS_DIR}"
 
 # All samples (comments/blanks stripped)
 grep -v '^#' "${SAMPLE_LIST}" | grep -v '^[[:space:]]*$' > "${ALL_SAMPLES_LIST}"
 N_ALL=$(wc -l < "${ALL_SAMPLES_LIST}")
 
-# Identify pending samples (no R1 FASTQ yet)
+# Identify pending samples (no HLA BAM yet)
 PENDING_LIST="${SCRATCH_BASE}/wes_samples_pending.txt"
 > "${PENDING_LIST}"
 while IFS= read -r S; do
-    [[ ! -f "${FASTQ_DIR}/${S}_R1.fastq.gz" ]] && echo "$S" >> "${PENDING_LIST}"
+    [[ ! -f "${BAM_DIR}/${S}_hla.bam" ]] && echo "$S" >> "${PENDING_LIST}"
 done < "${ALL_SAMPLES_LIST}"
 N_PENDING=$(wc -l < "${PENDING_LIST}")
 
@@ -130,6 +130,45 @@ N_TOTAL=$(wc -l < "${EFFECTIVE_LIST}")
 N_DONE=$(( N_ALL - N_PENDING ))
 
 #-----------------------------------------------------------------------------
+# GT filter: only keep samples present in the Gourraud 2014 ground truth
+# Downloads GT if not present (needed for calibration anyway).
+#-----------------------------------------------------------------------------
+if [[ ! -f "${GT_FILE}" ]] && [[ "$DRY_RUN" == "false" ]]; then
+    echo "[INFO] Downloading 1KGP ground truth (Gourraud 2014)..."
+    module load python-data 2>/dev/null || module load python/3.9 2>/dev/null || true
+    python3 "${INSTALL_DIR}/bin/calibrate_tool_weights.py" download-gt \
+        --output "${GT_FILE}" \
+        && echo "[OK] GT saved: ${GT_FILE}" \
+        || { echo "[ERROR] Could not download GT — aborting"; exit 1; }
+fi
+
+if [[ -f "${GT_FILE}" ]]; then
+    FILTERED_LIST="${SCRATCH_BASE}/wes_samples_gt_confirmed.txt"
+    python3 - << GTEOF
+import sys
+gt_samples = set()
+with open("${GT_FILE}") as f:
+    for line in f:
+        s = line.split('\t')[0].strip() if line.strip() else ''
+        if s and s != 'Sample':
+            gt_samples.add(s)
+kept, skipped = [], []
+with open("${EFFECTIVE_LIST}") as f:
+    for line in f:
+        s = line.strip()
+        if s:
+            (kept if s in gt_samples else skipped).append(s)
+with open("${FILTERED_LIST}", "w") as f:
+    f.write("\n".join(kept) + ("\n" if kept else ""))
+if skipped:
+    print(f"[WARN] {len(skipped)} sample(s) not in GT, excluded: {', '.join(skipped)}", file=sys.stderr)
+print(f"[INFO] GT-confirmed: {len(kept)} / {len(kept)+len(skipped)} samples in this batch")
+GTEOF
+    EFFECTIVE_LIST="${FILTERED_LIST}"
+    N_TOTAL=$(wc -l < "${EFFECTIVE_LIST}")
+fi
+
+#-----------------------------------------------------------------------------
 # --status: show progress and exit
 #-----------------------------------------------------------------------------
 if [[ "$STATUS_ONLY" == "true" ]]; then
@@ -137,9 +176,9 @@ if [[ "$STATUS_ONLY" == "true" ]]; then
     echo "Project:     ${PROJECT_ID}"
     echo "Master list: ${N_ALL} samples total"
     echo ""
-    echo "Phase 0 — FASTQs extracted:"
-    N_FQ=$(find "${FASTQ_DIR}" -name "*_R1.fastq.gz" 2>/dev/null | wc -l || echo 0)
-    echo "  ${N_FQ} / ${N_ALL} samples done   (${N_PENDING} pending)"
+    echo "Phase 0 — HLA BAMs downloaded:"
+    N_BAM=$(find "${BAM_DIR}" -name "*_hla.bam" 2>/dev/null | wc -l || echo 0)
+    echo "  ${N_BAM} / ${N_ALL} samples done   (${N_PENDING} pending)"
     echo ""
     echo "Phase 1 — Typing results:"
     for TOOL in $(echo "$TOOLS" | tr ',' ' '); do
@@ -154,7 +193,7 @@ fi
 
 # Nothing to extract?
 if [[ "$SKIP_EXTRACT" == "false" && "$CALIBRATE_ONLY" == "false" && "${N_TOTAL}" -eq 0 ]]; then
-    echo "[INFO] All ${N_ALL} samples already have FASTQs. Use --calibrate-only to run calibration."
+    echo "[INFO] All ${N_ALL} samples already have HLA BAMs. Use --calibrate-only to run calibration."
     exit 0
 fi
 
@@ -165,7 +204,7 @@ echo " Project:      ${PROJECT_ID}"
 echo " Samples:      ${N_TOTAL} this batch  (${N_DONE}/${N_ALL} total done; ${N_PENDING} pending)"
 echo " Tools:        ${TOOLS}"
 echo " Genes:        ${GENES}"
-echo " FASTQs:       ${FASTQ_DIR}"
+echo " BAMs:         ${BAM_DIR}"
 echo " Results:      ${RESULTS_DIR}"
 echo " Weights out:  ${WEIGHTS_OUT}"
 echo " Dry-run:      ${DRY_RUN}"
@@ -287,20 +326,19 @@ module load samtools 2>/dev/null || true
 SAMPLE=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "EFFECTIVE_LIST_PLACEHOLDER")
 [[ -z "$SAMPLE" ]] && { echo "[ERROR] Empty sample for task ${SLURM_ARRAY_TASK_ID}"; exit 1; }
 
-FASTQ_DIR="FASTQ_DIR_PLACEHOLDER"
+BAM_DIR="BAM_DIR_PLACEHOLDER"
 URL_MAP="URL_MAP_PLACEHOLDER"
 HLA_REGION="HLA_REGION_PLACEHOLDER"
 
-R1="${FASTQ_DIR}/${SAMPLE}_R1.fastq.gz"
-R2="${FASTQ_DIR}/${SAMPLE}_R2.fastq.gz"
+BAM_OUT="${BAM_DIR}/${SAMPLE}_hla.bam"
 
 echo "[INFO] Sample: ${SAMPLE}"
 echo "[INFO] Task:   ${SLURM_ARRAY_TASK_ID}"
 echo "[INFO] Date:   $(date)"
 
-# Skip if already done
-if [[ -f "$R1" ]] && [[ -f "$R2" ]]; then
-    echo "[SKIP] FASTQs already present for ${SAMPLE}"
+# Skip if already done (BAM + index both present)
+if [[ -f "${BAM_OUT}" ]] && [[ -f "${BAM_OUT}.bai" ]]; then
+    echo "[SKIP] HLA BAM already present for ${SAMPLE}"
     exit 0
 fi
 
@@ -313,9 +351,9 @@ fi
 PRIMARY_URL=$(echo "$LINE" | cut -f2)
 ALT_URLS=$(echo "$LINE" | cut -f3 | tr '|' ' ')
 
-# Try primary URL, then alt-date fallbacks
-TMP_BAM="${FASTQ_DIR}/${SAMPLE}_hla_tmp.bam"
-mkdir -p "${FASTQ_DIR}"
+# Try primary URL, then alt-date fallbacks — stream HLA region directly as BAM
+mkdir -p "${BAM_DIR}"
+TMP_BAM="${BAM_DIR}/${SAMPLE}_hla_tmp.bam"
 BAM_URL=""
 for URL in ${PRIMARY_URL} ${ALT_URLS}; do
     echo "[INFO] Trying: ${URL}"
@@ -340,29 +378,20 @@ if [[ -z "$BAM_URL" ]]; then
     exit 1
 fi
 
-# Name-sort and convert to FASTQ (paired; singletons discarded)
-samtools sort -n -@ 3 -m 2G -o "${TMP_BAM}.nsort.bam" "${TMP_BAM}"
-samtools fastq \
-    -1 "${R1}" \
-    -2 "${R2}" \
-    -s /dev/null \
-    -0 /dev/null \
-    "${TMP_BAM}.nsort.bam"
+# Coordinate-sort (required for BAM index) and index
+samtools sort -@ 3 -m 2G -o "${BAM_OUT}" "${TMP_BAM}"
+samtools index "${BAM_OUT}"
+rm -f "${TMP_BAM}"
 
-rm -f "${TMP_BAM}" "${TMP_BAM}.nsort.bam"
-
-N_READS=$(zcat "${R1}" | wc -l)
-N_PAIRS=$(( N_READS / 4 ))
-echo "[OK] FASTQs:"
-echo "  R1: ${R1} (${N_PAIRS} read pairs)"
-echo "  R2: ${R2}"
+NREADS_FINAL=$(samtools view -c "${BAM_OUT}")
+echo "[OK] HLA BAM: ${BAM_OUT} (${NREADS_FINAL} reads, indexed)"
 EXTRACTEOF
 
     # Substitute placeholders (heredoc can't expand variables inside 'EXTRACTEOF')
     sed -i \
         -e "s|LOGS_PLACEHOLDER|${LOGS_DIR}|g" \
         -e "s|EFFECTIVE_LIST_PLACEHOLDER|${EFFECTIVE_LIST}|g" \
-        -e "s|FASTQ_DIR_PLACEHOLDER|${FASTQ_DIR}|g" \
+        -e "s|BAM_DIR_PLACEHOLDER|${BAM_DIR}|g" \
         -e "s|URL_MAP_PLACEHOLDER|${URL_MAP}|g" \
         -e "s|HLA_REGION_PLACEHOLDER|${HLA_REGION}|g" \
         "$EXTRACT_SCRIPT"
@@ -382,7 +411,7 @@ EXTRACTEOF
         PHASE0_DEP="--dependency=afterok:${EXTRACT_JOB}"
     fi
 else
-    echo "[SKIP] Phase 0 — using existing FASTQs"
+    echo "[SKIP] Phase 0 — using existing HLA BAMs"
 fi
 
 #-----------------------------------------------------------------------------
@@ -396,17 +425,16 @@ if [[ "$SKIP_TYPING" == "false" ]]; then
     echo "=== Phase 1: Submitting Nextflow typing job ==="
 
     # Generate samplesheet from extracted FASTQs
-    SAMPLESHEET="${SCRATCH_BASE}/wes_samplesheet.csv"
+    SAMPLESHEET="${SCRATCH_BASE}/wes_bam_samplesheet.csv"
     cat > "${SCRATCH_BASE}/gen_samplesheet.sh" << GENEOF
 #!/bin/bash
-echo "sample_id,fastq_1,fastq_2" > "${SAMPLESHEET}"
+echo "sample_id,bam_path" > "${SAMPLESHEET}"
 while IFS= read -r SAMPLE; do
-    R1="${FASTQ_DIR}/\${SAMPLE}_R1.fastq.gz"
-    R2="${FASTQ_DIR}/\${SAMPLE}_R2.fastq.gz"
-    if [[ -f "\$R1" ]] && [[ -f "\$R2" ]]; then
-        echo "\${SAMPLE},\${R1},\${R2}" >> "${SAMPLESHEET}"
+    BAM="${BAM_DIR}/\${SAMPLE}_hla.bam"
+    if [[ -f "\$BAM" ]] && [[ -f "\${BAM}.bai" ]]; then
+        echo "\${SAMPLE},\${BAM}" >> "${SAMPLESHEET}"
     else
-        echo "[WARN] Missing FASTQs for \${SAMPLE} — skipped" >&2
+        echo "[WARN] Missing HLA BAM for \${SAMPLE} — skipped" >&2
     fi
 done < "${EFFECTIVE_LIST}"
 echo "[OK] Samplesheet: ${SAMPLESHEET} (\$(tail -n +2 ${SAMPLESHEET} | wc -l) samples)"
@@ -447,7 +475,7 @@ echo "Samples to type: \${N_SAMPLES_SHEET}"
 nextflow run main.nf \\
     --input_samplesheet "${SAMPLESHEET}" \\
     --seq_type wes \\
-    --reference hg38 \\
+    --reference hg19 \\
     --tools "${TOOLS}" \\
     --weighting equal \\
     --skip_qc true \\
