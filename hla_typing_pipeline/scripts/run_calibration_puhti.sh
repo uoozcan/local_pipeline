@@ -19,7 +19,7 @@ set -euo pipefail
 
 PROJECT_ID="project_2008084"
 BASE="/scratch/${PROJECT_ID}/ozcanumu"
-PIPELINE="${BASE}/new_pipeline_2/hla_typing_pipeline/hla_typing_pipeline"
+PIPELINE="${BASE}/new_pipeline_2/hla_typing_pipeline"
 RESULTS_DIR="${BASE}/hla_calibration/1kgp_typing_results/by_tool"
 GT="${BASE}/hla_calibration/conf/1kgp_hla_gt.tsv"
 VERSION="${1:-v3}"
