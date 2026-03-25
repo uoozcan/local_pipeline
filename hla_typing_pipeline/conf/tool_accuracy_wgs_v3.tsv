@@ -1,0 +1,9 @@
+Tool	Data_type	N_samples	A	B	C	DRB1	DQB1	Mean_concordance
+arcashla	wgs	122	0.016	0.156	0.025	0.426	0.279	0.180
+hlahd	wgs	122	0.270	0.361	0.107	0.861	0.754	0.470
+kourami	wgs	122	0.049	0.057	0.041	0.836	NA	0.246
+optitype	wgs	122	0.385	0.689	0.336	NA	NA	0.470
+polysolver	wgs	113	0.310	0.319	0.150	NA	NA	0.260
+seq2hla	wgs	31	0.000	0.000	0.000	0.000	0.000	0.000
+spechla	wgs	121	0.140	0.165	0.099	0.595	0.636	0.327
+xhla	wgs	0	NA	NA	NA	NA	NA	NA

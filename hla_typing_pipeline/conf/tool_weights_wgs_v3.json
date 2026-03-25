@@ -1,0 +1,171 @@
+{
+  "method": "normalized_concordance",
+  "resolution": "2-field",
+  "data_type": "wgs",
+  "n_samples": 122,
+  "description": "Per-gene normalized 2-field concordance weights derived from 1000 Genomes Project ground-truth HLA types (Gourraud et al. 2014). Weights per gene sum to 1.0 across tools that cover that gene.",
+  "genes": {
+    "A": {
+      "hlahd": 0.2309,
+      "spechla": 0.1199,
+      "arcashla": 0.014,
+      "optitype": 0.3288,
+      "xhla": 0.0,
+      "seq2hla": 0.0,
+      "kourami": 0.042,
+      "polysolver": 0.2644
+    },
+    "B": {
+      "hlahd": 0.2065,
+      "spechla": 0.0947,
+      "arcashla": 0.0892,
+      "optitype": 0.3943,
+      "xhla": 0.0,
+      "seq2hla": 0.0,
+      "kourami": 0.0329,
+      "polysolver": 0.1824
+    },
+    "C": {
+      "hlahd": 0.1406,
+      "spechla": 0.1309,
+      "arcashla": 0.0324,
+      "optitype": 0.4435,
+      "xhla": 0.0,
+      "seq2hla": 0.0,
+      "kourami": 0.0541,
+      "polysolver": 0.1985
+    },
+    "DRB1": {
+      "hlahd": 0.3167,
+      "spechla": 0.2189,
+      "arcashla": 0.1568,
+      "optitype": 0.0,
+      "xhla": 0.0,
+      "seq2hla": 0.0,
+      "kourami": 0.3076,
+      "polysolver": 0.0
+    },
+    "DQA1": {
+      "hlahd": 0.25,
+      "spechla": 0.25,
+      "arcashla": 0.25,
+      "optitype": 0.0,
+      "xhla": 0.0,
+      "seq2hla": 0.25,
+      "kourami": 0.0,
+      "polysolver": 0.0
+    },
+    "DQB1": {
+      "hlahd": 0.4518,
+      "spechla": 0.3813,
+      "arcashla": 0.167,
+      "optitype": 0.0,
+      "xhla": 0.0,
+      "seq2hla": 0.0,
+      "kourami": 0.0,
+      "polysolver": 0.0
+    },
+    "DPA1": {
+      "hlahd": 0.25,
+      "spechla": 0.25,
+      "arcashla": 0.25,
+      "optitype": 0.0,
+      "xhla": 0.0,
+      "seq2hla": 0.25,
+      "kourami": 0.0,
+      "polysolver": 0.0
+    },
+    "DPB1": {
+      "hlahd": 0.2,
+      "spechla": 0.2,
+      "arcashla": 0.2,
+      "optitype": 0.0,
+      "xhla": 0.2,
+      "seq2hla": 0.2,
+      "kourami": 0.0,
+      "polysolver": 0.0
+    }
+  },
+  "raw_accuracy": {
+    "hlahd": {
+      "A": 0.2705,
+      "B": 0.3607,
+      "C": 0.1066,
+      "DRB1": 0.8607,
+      "DQA1": 0.0,
+      "DQB1": 0.7541,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "spechla": {
+      "A": 0.1405,
+      "B": 0.1653,
+      "C": 0.0992,
+      "DRB1": 0.595,
+      "DQA1": 0.0,
+      "DQB1": 0.6364,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "arcashla": {
+      "A": 0.0164,
+      "B": 0.1557,
+      "C": 0.0246,
+      "DRB1": 0.4262,
+      "DQA1": 0.0,
+      "DQB1": 0.2787,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "optitype": {
+      "A": 0.3852,
+      "B": 0.6885,
+      "C": 0.3361,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "xhla": {
+      "A": 0.0,
+      "B": 0.0,
+      "C": 0.0,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "seq2hla": {
+      "A": 0.0,
+      "B": 0.0,
+      "C": 0.0,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "kourami": {
+      "A": 0.0492,
+      "B": 0.0574,
+      "C": 0.041,
+      "DRB1": 0.8361,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    },
+    "polysolver": {
+      "A": 0.3097,
+      "B": 0.3186,
+      "C": 0.1504,
+      "DRB1": 0.0,
+      "DQA1": 0.0,
+      "DQB1": 0.0,
+      "DPA1": 0.0,
+      "DPB1": 0.0
+    }
+  }
+}
