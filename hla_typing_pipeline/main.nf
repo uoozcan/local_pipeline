@@ -18,7 +18,6 @@ include { HLAHD } from './modules/hlahd'
 include { HLALA } from './modules/hlala'
 include { ARCASHLA } from './modules/arcashla'
 include { OPTITYPE } from './modules/optitype'
-include { XHLA } from './modules/xhla'
 include { HLASCAN } from './modules/hlascan'
 include { POLYSOLVER } from './modules/polysolver'
 include { KOURAMI } from './modules/kourami'
@@ -29,7 +28,6 @@ include { SPECHLA_FASTQ } from './modules/spechla'
 include { HLAHD_FASTQ } from './modules/hlahd'
 include { ARCASHLA_FASTQ } from './modules/arcashla'
 include { OPTITYPE_FASTQ } from './modules/optitype'
-include { XHLA_FASTQ } from './modules/xhla'
 include { HLASCAN_FASTQ } from './modules/hlascan'
 include { T1K_FASTQ; T1K_LONGREADS } from './modules/t1k'
 include { SEQ2HLA } from './modules/seq2hla'
@@ -92,8 +90,8 @@ def helpMessage() {
         --outdir            Output directory (default: ./results)
         --reference         Reference genome: hg38 or hg19 (default: hg38)
         --tools             HLA typing tools to use (default: spechla,hlahd)
-                            Options: spechla,hlahd,hlala,arcashla,optitype,xhla,hlascan
-                            Note: hlala and xhla work best with BAM input
+                            Options: spechla,hlahd,hlala,arcashla,optitype,hlascan
+                            Note: hlala works best with BAM input
                             Note: hlascan requires full genome BAM + hg19 reference (v2.1 limitation)
                             In multi-source mode, tools are also filtered by seq_type compatibility
         --seq_type          Sequence type: dna, rna, longreads_hifi, longreads_ont (default: dna)
@@ -220,8 +218,8 @@ if (params.input_bam) {
 // longreads_hifi: PacBio HiFi BAM  → T1K (long-read mode) + HiFi-HLA (4-field)
 // longreads_ont:  Oxford Nanopore  → T1K (long-read mode)
 def SEQ_TYPE_TOOLS = [
-    'WGS'            : ['spechla', 'hlahd', 'hlala', 'arcashla', 'optitype', 'xhla', 'hlascan', 't1k', 'polysolver', 'kourami'],
-    'WES'            : ['spechla', 'hlahd', 'optitype', 'xhla', 'hlascan', 't1k', 'polysolver', 'kourami'],
+    'WGS'            : ['spechla', 'hlahd', 'hlala', 'arcashla', 'optitype', 'hlascan', 't1k', 'polysolver', 'kourami'],
+    'WES'            : ['spechla', 'hlahd', 'optitype', 'hlascan', 't1k', 'polysolver', 'kourami'],
     'RNAseq'         : ['arcashla', 'optitype', 't1k', 'seq2hla'],
     'targeted'       : ['optitype', 'hlahd'],
     'longreads_hifi' : ['t1k', 'hifihla'],
@@ -421,12 +419,6 @@ workflow {
                 [sample_id, 'optitype', result_file]
             })
         }
-        if ('xhla' in tools_list) {
-            XHLA(ch_input, params.reference)
-            ch_results = ch_results.mix(XHLA.out.results.map { sample_id, result_file ->
-                [sample_id, 'xhla', result_file]
-            })
-        }
         if ('polysolver' in tools_list) {
             POLYSOLVER(ch_input, params.reference)
             ch_results = ch_results.mix(POLYSOLVER.out.results.map { sample_id, result_file ->
@@ -507,14 +499,6 @@ workflow {
         // Run BAMQC if requested
         if (params.run_bamqc) {
             BAMQC(ch_bam)
-        }
-
-        // Run xHLA if requested
-        if ('xhla' in tools_list) {
-            XHLA(ch_input)
-            ch_results = ch_results.mix(XHLA.out.results.map { sample_id, result_file ->
-                [sample_id, 'xhla', result_file]
-            })
         }
 
         // Run HLAscan if requested (BAM input; hg19 only in v2.1 container)
@@ -617,14 +601,6 @@ workflow {
             OPTITYPE_FASTQ(ch_input, seq_type)
             ch_results = ch_results.mix(OPTITYPE_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'optitype', result_file]
-            })
-        }
-
-        // Run xHLA if requested (note: xHLA works best with BAM, FASTQ support is limited)
-        if ('xhla' in tools_list) {
-            XHLA_FASTQ(ch_input)
-            ch_results = ch_results.mix(XHLA_FASTQ.out.results.map { sample_id, result_file ->
-                [sample_id, 'xhla', result_file]
             })
         }
 
@@ -751,18 +727,6 @@ workflow {
             )
             ch_results = ch_results.mix(OPTITYPE.out.results.map { sample_id, result_file ->
                 [sample_id, 'optitype', result_file]
-            })
-
-            // xHLA — WGS, WES
-            XHLA(
-                ch_ms_bam_validated
-                    .filter { sample_id, bam, seq_type, patient_id ->
-                        'xhla' in resolveTools(seq_type, tools_list)
-                    }
-                    .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] }
-            )
-            ch_results = ch_results.mix(XHLA.out.results.map { sample_id, result_file ->
-                [sample_id, 'xhla', result_file]
             })
 
             // T1K long-read mode — longreads_hifi / longreads_ont BAM samples
@@ -901,18 +865,6 @@ workflow {
             OPTITYPE_FASTQ(ch_opti_ms.reads, ch_opti_ms.mode)
             ch_results = ch_results.mix(OPTITYPE_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'optitype', result_file]
-            })
-
-            // xHLA (FASTQ) — targeted (if selected)
-            XHLA_FASTQ(
-                ch_ms_fastq_validated
-                    .filter { sample_id, fq1, fq2, seq_type, patient_id ->
-                        'xhla' in resolveTools(seq_type, tools_list)
-                    }
-                    .map { sample_id, fq1, fq2, seq_type, patient_id -> [sample_id, fq1, fq2] }
-            )
-            ch_results = ch_results.mix(XHLA_FASTQ.out.results.map { sample_id, result_file ->
-                [sample_id, 'xhla', result_file]
             })
 
             // seq2HLA (FASTQ) — RNAseq only; Class I + II; built-in reference

@@ -30,7 +30,7 @@ process XHLA {
     # Check for BAM index, create if missing
     if [ ! -f "${bam}.bai" ] && [ ! -f "${bam.baseName}.bai" ]; then
         echo "Creating BAM index..."
-        samtools index -@ ${task.cpus} ${bam}
+        samtools index ${bam}
     fi
 
     # Determine chromosome naming convention (chr6 vs 6)
