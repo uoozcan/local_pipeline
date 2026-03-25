@@ -13,14 +13,20 @@
 # Options:
 #   --project PROJECT_ID   CSC project account (default: $SLURM_JOB_ACCOUNT or project_2008084)
 #   --sample-list FILE     Sample list (default: conf/wes_samples_50.txt)
-#   --n-samples N          Use only first N samples from list (default: all)
+#   --batch-size N         Process next N unextracted samples per run (default: 10)
 #   --tools TOOLS          Comma-separated tools (default: hlahd,spechla,arcashla,optitype)
 #   --genes GENES          Comma-separated genes (default: A,B,C,DRB1,DQB1)
 #   --skip-extract         Skip Phase 0 (FASTQs already present)
 #   --skip-typing          Skip Phase 1 (results already present)
+#   --calibrate-only       Skip to Phase 2 (calibrate from existing results)
 #   --status               Show current progress and exit
 #   --dry-run              Print commands without submitting
 #   -h, --help             Show this help
+#
+# Batching: each run extracts and types the next --batch-size samples without FASTQs.
+# Re-run after each batch completes. Calibration accumulates all results.
+# Example (5 runs of 10):
+#   bash scripts/run_wes_calibration_puhti.sh --project project_2008084 --batch-size 10
 #
 # Phase 0: SLURM array — stream HLA region from EBI WES BAM → paired FASTQs
 # Phase 1: SLURM job  — run Nextflow typing batch (seq_type=wes)
@@ -36,14 +42,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(dirname "$SCRIPT_DIR")"   # hla_typing_pipeline/
 
 PROJECT_ID="${SLURM_JOB_ACCOUNT:-project_2008084}"
-TOOLS="hlahd,spechla,arcashla,optitype"
+TOOLS="hlahd,spechla,arcashla,optitype,seq2hla,kourami,polysolver"
 GENES="A,B,C,DRB1,DQB1"
 RESOLUTION="2-field"
 SAMPLE_LIST_DEFAULT="${INSTALL_DIR}/conf/wes_samples_50.txt"
 SAMPLE_LIST=""
-N_SAMPLES=0    # 0 = all
+BATCH_SIZE=10   # samples per run; 0 = all
 SKIP_EXTRACT=false
 SKIP_TYPING=false
+CALIBRATE_ONLY=false
 STATUS_ONLY=false
 DRY_RUN=false
 
@@ -57,12 +64,13 @@ HLA_REGION="6:28000000-34000000"   # hg19/GRCh37 ENSEMBL (no chr prefix)
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --project)   PROJECT_ID="$2";       shift 2 ;;
-        --sample-list) SAMPLE_LIST="$2";   shift 2 ;;
-        --n-samples) N_SAMPLES="$2";        shift 2 ;;
+        --sample-list) SAMPLE_LIST="$2";    shift 2 ;;
+        --batch-size)  BATCH_SIZE="$2";     shift 2 ;;
         --tools)     TOOLS="$2";            shift 2 ;;
         --genes)     GENES="$2";            shift 2 ;;
-        --skip-extract) SKIP_EXTRACT=true;  shift ;;
-        --skip-typing)  SKIP_TYPING=true;   shift ;;
+        --skip-extract)   SKIP_EXTRACT=true;   shift ;;
+        --skip-typing)    SKIP_TYPING=true;    shift ;;
+        --calibrate-only) CALIBRATE_ONLY=true; SKIP_EXTRACT=true; SKIP_TYPING=true; shift ;;
         --status)    STATUS_ONLY=true;      shift ;;
         --dry-run)   DRY_RUN=true;          shift ;;
         -h|--help)
@@ -89,21 +97,37 @@ WEIGHTS_OUT="${INSTALL_DIR}/conf/tool_weights_wes_v1.json"
 TABLE_OUT="${INSTALL_DIR}/conf/tool_accuracy_wes_v1.tsv"
 
 #-----------------------------------------------------------------------------
-# Build filtered sample list (strip comments/blank lines, apply --n-samples)
+# Build effective sample list for this batch
+# - Strip comments/blanks from master list
+# - Filter to samples whose FASTQs do NOT yet exist (--batch-size 0 = all pending)
+# - Take first BATCH_SIZE of those
 #-----------------------------------------------------------------------------
 EFFECTIVE_LIST="${SCRATCH_BASE}/wes_samples_effective.txt"
+ALL_SAMPLES_LIST="${SCRATCH_BASE}/wes_samples_all.txt"
 
 mkdir -p "${SCRATCH_BASE}" "${FASTQ_DIR}" "${RESULTS_DIR}" "${INDEX_DIR}" "${LOGS_DIR}"
 
-grep -v '^#' "${SAMPLE_LIST}" | grep -v '^[[:space:]]*$' > "${EFFECTIVE_LIST}.tmp" || true
-if [[ "${N_SAMPLES}" -gt 0 ]]; then
-    head -n "${N_SAMPLES}" "${EFFECTIVE_LIST}.tmp" > "${EFFECTIVE_LIST}"
+# All samples (comments/blanks stripped)
+grep -v '^#' "${SAMPLE_LIST}" | grep -v '^[[:space:]]*$' > "${ALL_SAMPLES_LIST}"
+N_ALL=$(wc -l < "${ALL_SAMPLES_LIST}")
+
+# Identify pending samples (no R1 FASTQ yet)
+PENDING_LIST="${SCRATCH_BASE}/wes_samples_pending.txt"
+> "${PENDING_LIST}"
+while IFS= read -r S; do
+    [[ ! -f "${FASTQ_DIR}/${S}_R1.fastq.gz" ]] && echo "$S" >> "${PENDING_LIST}"
+done < "${ALL_SAMPLES_LIST}"
+N_PENDING=$(wc -l < "${PENDING_LIST}")
+
+# Apply batch size
+if [[ "${BATCH_SIZE}" -gt 0 && "${N_PENDING}" -gt "${BATCH_SIZE}" ]]; then
+    head -n "${BATCH_SIZE}" "${PENDING_LIST}" > "${EFFECTIVE_LIST}"
 else
-    mv "${EFFECTIVE_LIST}.tmp" "${EFFECTIVE_LIST}"
+    cp "${PENDING_LIST}" "${EFFECTIVE_LIST}"
 fi
-rm -f "${EFFECTIVE_LIST}.tmp"
 
 N_TOTAL=$(wc -l < "${EFFECTIVE_LIST}")
+N_DONE=$(( N_ALL - N_PENDING ))
 
 #-----------------------------------------------------------------------------
 # --status: show progress and exit
@@ -111,11 +135,11 @@ N_TOTAL=$(wc -l < "${EFFECTIVE_LIST}")
 if [[ "$STATUS_ONLY" == "true" ]]; then
     echo "=== WES Calibration Status ==="
     echo "Project:     ${PROJECT_ID}"
-    echo "Samples:     ${N_TOTAL} in ${EFFECTIVE_LIST}"
+    echo "Master list: ${N_ALL} samples total"
     echo ""
     echo "Phase 0 — FASTQs extracted:"
     N_FQ=$(find "${FASTQ_DIR}" -name "*_R1.fastq.gz" 2>/dev/null | wc -l || echo 0)
-    echo "  ${N_FQ} / ${N_TOTAL} R1 files in ${FASTQ_DIR}"
+    echo "  ${N_FQ} / ${N_ALL} samples done   (${N_PENDING} pending)"
     echo ""
     echo "Phase 1 — Typing results:"
     for TOOL in $(echo "$TOOLS" | tr ',' ' '); do
@@ -128,11 +152,17 @@ if [[ "$STATUS_ONLY" == "true" ]]; then
     exit 0
 fi
 
+# Nothing to extract?
+if [[ "$SKIP_EXTRACT" == "false" && "$CALIBRATE_ONLY" == "false" && "${N_TOTAL}" -eq 0 ]]; then
+    echo "[INFO] All ${N_ALL} samples already have FASTQs. Use --calibrate-only to run calibration."
+    exit 0
+fi
+
 echo "==================================================================="
 echo " WES HLA Calibration — CSC Puhti"
 echo "==================================================================="
 echo " Project:      ${PROJECT_ID}"
-echo " Samples:      ${N_TOTAL} (from ${SAMPLE_LIST})"
+echo " Samples:      ${N_TOTAL} this batch  (${N_DONE}/${N_ALL} total done; ${N_PENDING} pending)"
 echo " Tools:        ${TOOLS}"
 echo " Genes:        ${GENES}"
 echo " FASTQs:       ${FASTQ_DIR}"
@@ -301,9 +331,10 @@ EXTRACTEOF
         -e "s|HLA_REGION_PLACEHOLDER|${HLA_REGION}|g" \
         "$EXTRACT_SCRIPT"
 
+    CONCURRENT=$([[ "${BATCH_SIZE}" -gt 0 ]] && echo "${BATCH_SIZE}" || echo "10")
     SBATCH_EXTRACT="sbatch --parsable \
         --account=${PROJECT_ID} \
-        --array=1-${N_TOTAL}%10 \
+        --array=1-${N_TOTAL}%${CONCURRENT} \
         ${EXTRACT_SCRIPT}"
 
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -345,11 +376,8 @@ done < "${EFFECTIVE_LIST}"
 echo "[OK] Samplesheet: ${SAMPLESHEET} (\$(tail -n +2 ${SAMPLESHEET} | wc -l) samples)"
 GENEOF
 
-    if [[ "$DRY_RUN" == "false" ]]; then
-        bash "${SCRATCH_BASE}/gen_samplesheet.sh"
-    else
-        echo "[DRY-RUN] Would generate ${SAMPLESHEET}"
-    fi
+    # NOTE: samplesheet is generated inside the Phase 1 SLURM job (after Phase 0 FASTQs are ready)
+    echo "[INFO] Samplesheet will be generated in Phase 1 job: ${SAMPLESHEET}"
 
     TYPING_SCRIPT="${SCRATCH_BASE}/phase1_typing.sh"
     cat > "$TYPING_SCRIPT" << TYPINGEOF
