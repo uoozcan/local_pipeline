@@ -78,20 +78,32 @@ def parse_class_file(filepath):
                 a2    = cols[3].strip().rstrip("'")
                 c2_s  = cols[4].strip()
 
-                # Parse confidence values; treat 'NA' or empty as 0.0
-                try:
-                    c1 = float(c1_s) if c1_s not in ('NA', '') else 0.0
-                except ValueError:
-                    c1 = 0.0
-                try:
-                    c2 = float(c2_s) if c2_s not in ('NA', '') else 0.0
-                except ValueError:
-                    c2 = 0.0
+                # Parse confidence values.
+                # 'NA' means seq2HLA could not compute a confidence (common on WGS
+                # data due to low HLA-region mapping) — treat NA as unscored, NOT as 0.
+                # Only filter when confidence is an explicit low numeric value.
+                def parse_conf(s):
+                    if s in ('NA', ''):
+                        return None          # unscored — do not filter
+                    try:
+                        return float(s)
+                    except ValueError:
+                        return None
 
-                # Require at least one allele above threshold to include the locus
-                if c1 <= CONF_THRESHOLD and c2 <= CONF_THRESHOLD:
+                c1 = parse_conf(c1_s)
+                c2 = parse_conf(c2_s)
+
+                # Skip only when BOTH confidences are numeric AND below threshold.
+                # If either is NA (unscored) we keep the allele.
+                c1_low = (c1 is not None and c1 <= CONF_THRESHOLD)
+                c2_low = (c2 is not None and c2 <= CONF_THRESHOLD)
+                if c1_low and c2_low:
                     print("  Skipping {}: both allele confidences below {} (c1={:.3f}, c2={:.3f})".format(
                         gene, CONF_THRESHOLD, c1, c2), file=sys.stderr)
+                    continue
+
+                # Skip loci where allele1 is 'no' (seq2HLA could not type it at all)
+                if a1.lower() in ('no', 'not typed', '-', ''):
                     continue
 
                 # Fall back to allele1 if allele2 is absent or 'not typed'
