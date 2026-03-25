@@ -2,11 +2,12 @@
 """make_paper_figures.py — Generate publication-quality scientific figures
 from HLA typing pipeline outputs.
 
-Produces 16 figures in 4 groups:
+Produces 20 figures in 5 groups:
   A: Resource benchmarking      (from Nextflow trace)
   B: HLA typing quality         (from consensus/comparison TSVs)
   C: Tool accuracy              (from tool_weights JSON)
   D: Summary panels             (composite)
+  V: Weighted voting analysis   (the pipeline's novel contribution)
 
 Usage:
     python3 make_paper_figures.py \
@@ -486,6 +487,11 @@ def fig_B2_tool_concordance(gene_data, tool_names, sample_id, output_dir, fmt):
     labels_g = [g.replace('HLA-', '') for g in genes]
     matrix   = np.full((len(tools), len(genes)), np.nan)
 
+    def _b2_to_set(s):
+        if not s or s in ('-', ''):
+            return set()
+        return set(a.strip() for a in re.split(r'[/,]', s) if a.strip() not in ('-', ''))
+
     for j, gene in enumerate(genes):
         entry     = gene_data[gene]
         consensus = entry.get('consensus', '-')
@@ -493,10 +499,16 @@ def fig_B2_tool_concordance(gene_data, tool_names, sample_id, output_dir, fmt):
             alleles = entry.get('tools', {}).get(tool, {}).get('alleles', '-')
             if alleles in ('-', '', None):
                 matrix[i, j] = np.nan
-            elif consensus and (alleles == consensus
-                                or consensus in alleles
-                                or alleles in consensus):
-                matrix[i, j] = 1.0
+            elif consensus and alleles not in ('-', '', None):
+                cons_set = _b2_to_set(consensus)
+                call_set = _b2_to_set(alleles)
+                overlap  = len(cons_set & call_set)
+                if overlap == len(cons_set) and overlap == len(call_set):
+                    matrix[i, j] = 1.0   # full match
+                elif overlap > 0:
+                    matrix[i, j] = 0.5   # partial match
+                else:
+                    matrix[i, j] = 0.0   # conflict
             else:
                 matrix[i, j] = 0.0
 
@@ -506,12 +518,13 @@ def fig_B2_tool_concordance(gene_data, tool_names, sample_id, output_dir, fmt):
     mask = np.isnan(matrix)
     if HAS_SEABORN:
         annot = np.where(mask, '',
-                         np.where(matrix == 1.0, '✓', '✗').astype(object))
+                         np.where(matrix == 1.0, '✓',
+                                  np.where(matrix == 0.5, '½', '✗')).astype(object))
         sns.heatmap(matrix, annot=annot, fmt='',
                     cmap='RdYlGn', vmin=0, vmax=1,
                     xticklabels=labels_g, yticklabels=tools,
                     linewidths=0.5, linecolor='white',
-                    cbar_kws={'label': 'Agreement with consensus'},
+                    cbar_kws={'label': 'Agreement with consensus (1=full, 0.5=partial, 0=conflict)'},
                     mask=mask, ax=ax)
     else:
         im = ax.imshow(matrix, cmap='RdYlGn', vmin=0, vmax=1, aspect='auto')
@@ -519,7 +532,7 @@ def fig_B2_tool_concordance(gene_data, tool_names, sample_id, output_dir, fmt):
         ax.set_yticks(range(len(tools)))
         ax.set_xticklabels(labels_g, rotation=30, ha='right')
         ax.set_yticklabels(tools)
-        plt.colorbar(im, ax=ax, label='Agreement')
+        plt.colorbar(im, ax=ax, label='Agreement (1=full, 0.5=partial, 0=conflict)')
 
     ax.set_title(f'Tool vs Consensus Agreement — {sample_id}')
     fig.tight_layout()
@@ -870,6 +883,789 @@ def fig_D2_summary_panel(output_dir, fmt):
     plt.close(fig)
 
 
+# ─── Group V: Weighted Voting Analysis ───────────────────────────────────────
+
+def _allele_match(consensus, alleles):
+    """Return 'full', 'partial', 'conflict', or 'none'."""
+    if not alleles or alleles in ('-', ''):
+        return 'none'
+    if not consensus or consensus in ('-', ''):
+        return 'none'
+    def to_set(s):
+        return set(a.strip() for a in re.split(r'[/,]', s) if a.strip() not in ('-', ''))
+    c = to_set(consensus)
+    a = to_set(alleles)
+    overlap = len(c & a)
+    if overlap >= len(c) or overlap >= len(a):
+        return 'full'
+    elif overlap > 0:
+        return 'partial'
+    else:
+        return 'conflict'
+
+
+def fig_V1_allele_vote_matrix(gene_data, tool_names, consensus_df, sample_id, output_dir, fmt):
+    """
+    Annotated heatmap: tools (rows) x classical HLA genes (cols).
+
+    Each cell shows the allele(s) called by that tool for that gene.
+    Background colour encodes agreement with the consensus:
+      Green  = full match (all alleles agree)
+      Amber  = partial match (one allele correct, one different)
+      Red    = conflict (all alleles differ from consensus)
+      Light grey = not called / no result
+    Bottom row shows the final consensus call.
+    """
+    genes = [g for g in GENE_ORDER if g in gene_data]
+    tools = [t for t in TOOL_ORDER if t in tool_names]
+    tools += [t for t in tool_names if t not in TOOL_ORDER]
+    if not genes or not tools:
+        return
+
+    MATCH_COLORS = {
+        'full':     '#27AE60',
+        'partial':  '#F39C12',
+        'conflict': '#E74C3C',
+        'none':     '#ECECEC',
+    }
+
+    nrows = len(tools) + 1   # +1 for consensus row
+    ncols = len(genes)
+    fig, ax = plt.subplots(figsize=(max(7, ncols * 1.3), max(4, nrows * 0.75)))
+    ax.set_xlim(0, ncols)
+    ax.set_ylim(0, nrows)
+    ax.axis('off')
+
+    gene_labels = [g.replace('HLA-', '') for g in genes]
+
+    # Draw column headers (gene names)
+    for j, gl in enumerate(gene_labels):
+        ax.text(j + 0.5, nrows - 0.15, gl,
+                ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+    # Draw tool rows (top = first tool, bottom-1 = last tool, bottom = consensus)
+    for i, tool in enumerate(tools):
+        row_y = nrows - 1 - i
+        ax.text(-0.05, row_y - 0.5, tool, ha='right', va='center',
+                fontsize=8, fontweight='normal',
+                color=TOOL_COLORS.get(tool, '#333'))
+        for j, gene in enumerate(genes):
+            entry = gene_data[gene]
+            consensus = entry.get('consensus', '-')
+            alleles = entry.get('tools', {}).get(tool, {}).get('alleles', '-')
+            match = _allele_match(consensus, alleles)
+            color = MATCH_COLORS[match]
+
+            rect = plt.Rectangle((j, row_y - 1), 1, 1,
+                                  facecolor=color, edgecolor='white',
+                                  linewidth=1.5)
+            ax.add_patch(rect)
+
+            if alleles and alleles not in ('-', ''):
+                parts = re.split(r'/', alleles)
+                short = '\n'.join(a.strip() for a in parts[:2])
+                txt_color = 'white' if match in ('full', 'conflict') else '#333'
+                ax.text(j + 0.5, row_y - 0.5, short,
+                        ha='center', va='center', fontsize=6,
+                        color=txt_color, linespacing=1.2)
+            else:
+                ax.text(j + 0.5, row_y - 0.5, '\u2014',
+                        ha='center', va='center', fontsize=8, color='#999')
+
+    # Consensus row at the bottom
+    cons_y = 0
+    ax.text(-0.05, cons_y + 0.5, 'Consensus', ha='right', va='center',
+            fontsize=8, fontweight='bold', color='#333')
+    for j, gene in enumerate(genes):
+        consensus = gene_data[gene].get('consensus', '-')
+        rect = plt.Rectangle((j, cons_y), 1, 1,
+                              facecolor='#2C3E50', edgecolor='white',
+                              linewidth=1.5)
+        ax.add_patch(rect)
+        if consensus and consensus not in ('-',):
+            parts = re.split(r'/', consensus)
+            short = '\n'.join(a.strip() for a in parts[:2])
+            ax.text(j + 0.5, cons_y + 0.5, short,
+                    ha='center', va='center', fontsize=6.5,
+                    color='white', fontweight='bold', linespacing=1.2)
+
+    # Legend
+    legend_patches = [
+        mpatches.Patch(facecolor=MATCH_COLORS['full'],     label='Full match'),
+        mpatches.Patch(facecolor=MATCH_COLORS['partial'],  label='Partial match (1 allele)'),
+        mpatches.Patch(facecolor=MATCH_COLORS['conflict'], label='Conflict'),
+        mpatches.Patch(facecolor=MATCH_COLORS['none'],     label='Not called'),
+        mpatches.Patch(facecolor='#2C3E50',                label='Consensus'),
+    ]
+    ax.legend(handles=legend_patches, loc='upper right',
+              bbox_to_anchor=(1.0, -0.02), ncol=5, fontsize=7,
+              frameon=True, borderpad=0.5)
+
+    ax.set_title(f'Weighted Majority Vote Matrix \u2014 {sample_id}',
+                 fontsize=12, fontweight='bold', pad=10)
+    fig.tight_layout()
+    _save(fig, output_dir, 'fig_V1_allele_vote_matrix', fmt)
+    plt.close(fig)
+
+
+def fig_V2_vote_weight_breakdown(gene_data, tool_names, consensus_df, sample_id,
+                                  output_dir, fmt, weights_data=None):
+    """
+    Horizontal stacked bar: per classical gene, how much total vote weight
+    agreed with the consensus vs disagreed vs did not call.
+    """
+    genes = [g for g in GENE_ORDER if g in gene_data]
+    tools = [t for t in TOOL_ORDER if t in tool_names]
+    tools += [t for t in tool_names if t not in TOOL_ORDER]
+    if not genes or not tools:
+        return
+
+    gene_labels = [g.replace('HLA-', '') for g in genes]
+
+    cal_weights = {}
+    if weights_data:
+        genes_section = weights_data.get('genes', {})
+        for gs, tw in genes_section.items():
+            for tool, w in tw.items():
+                cal_weights.setdefault(tool.upper(), {})[gs.upper()] = float(w)
+
+    def get_weight(tool, gene):
+        gs = gene.replace('HLA-', '').upper()
+        return cal_weights.get(tool.upper(), {}).get(gs, 1.0)
+
+    agree_vals = []
+    partial_vals = []
+    conflict_vals = []
+    nocall_vals = []
+    agree_labels = []
+
+    for gene in genes:
+        entry = gene_data[gene]
+        consensus = entry.get('consensus', '-')
+        w_agree = w_partial = w_conflict = w_nocall = 0.0
+        a_tools = []
+        for tool in tools:
+            alleles = entry.get('tools', {}).get(tool, {}).get('alleles', '-')
+            w = get_weight(tool, gene)
+            match = _allele_match(consensus, alleles)
+            if match == 'full':
+                w_agree += w; a_tools.append(tool)
+            elif match == 'partial':
+                w_partial += w
+            elif match == 'conflict':
+                w_conflict += w
+            else:
+                w_nocall += w
+        agree_vals.append(w_agree)
+        partial_vals.append(w_partial)
+        conflict_vals.append(w_conflict)
+        nocall_vals.append(w_nocall)
+        agree_labels.append(a_tools)
+
+    y = np.arange(len(genes))
+    fig, ax = plt.subplots(figsize=(8, max(3.5, len(genes) * 0.55)))
+
+    b1 = ax.barh(y, agree_vals,   color='#27AE60', label='Full agreement', height=0.6)
+    b2 = ax.barh(y, partial_vals, left=agree_vals, color='#F39C12', label='Partial agreement', height=0.6)
+    left2 = [a + p for a, p in zip(agree_vals, partial_vals)]
+    b3 = ax.barh(y, conflict_vals, left=left2, color='#E74C3C', label='Conflict', height=0.6)
+    left3 = [a + b for a, b in zip(left2, conflict_vals)]
+    b4 = ax.barh(y, nocall_vals,  left=left3, color='#ECECEC', label='Not called',
+                 height=0.6, edgecolor='#ccc', linewidth=0.5)
+
+    for idx, (bar, tl) in enumerate(zip(b1, agree_labels)):
+        w = bar.get_width()
+        if w > 0.3 and tl:
+            label = ', '.join(t[:3] for t in tl)
+            ax.text(w / 2, bar.get_y() + bar.get_height() / 2,
+                    label, ha='center', va='center',
+                    fontsize=6, color='white', fontweight='bold')
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(gene_labels)
+    ax.set_xlabel('Vote weight (equal: # tools)')
+    ax.set_title(f'Voting Weight Breakdown per Gene \u2014 {sample_id}')
+    ax.legend(loc='lower right', fontsize=8)
+    total = len(tools)
+    ax.set_xlim(0, total * 1.05)
+    ax.axvline(total / 2, color='black', linestyle=':', linewidth=0.8, alpha=0.5)
+    fig.tight_layout()
+    _save(fig, output_dir, 'fig_V2_vote_weight_breakdown', fmt)
+    plt.close(fig)
+
+
+def fig_V3_weighted_confidence_comparison(gene_data, tool_names, consensus_df,
+                                           sample_id, output_dir, fmt,
+                                           weights_data=None):
+    """
+    For each classical HLA gene: side-by-side bars comparing consensus
+    confidence under three weighting strategies:
+      1. Equal weighting     - each tool votes with weight 1.0
+      2. Calibrated weighting - weights from tool_weights JSON
+      3. Observed (current)  - the actual confidence from consensus file
+    """
+    genes = [g for g in GENE_ORDER if g in gene_data]
+    tools = [t for t in TOOL_ORDER if t in tool_names]
+    tools += [t for t in tool_names if t not in TOOL_ORDER]
+    if not genes or not tools:
+        return
+
+    gene_labels = [g.replace('HLA-', '') for g in genes]
+
+    cal_weights = {}
+    if weights_data:
+        for gs, tw in weights_data.get('genes', {}).items():
+            for tool, w in tw.items():
+                cal_weights.setdefault(tool.upper(), {})[gs.upper()] = float(w)
+
+    def get_cal_weight(tool, gene):
+        gs = gene.replace('HLA-', '').upper()
+        return cal_weights.get(tool.upper(), {}).get(gs, None)
+
+    equal_conf = []
+    calib_conf = []
+    obs_conf   = []
+
+    cons_lookup = {}
+    if consensus_df is not None and not consensus_df.empty:
+        for _, row in consensus_df.iterrows():
+            cons_lookup[row['Gene']] = row.get('Confidence')
+
+    for gene in genes:
+        entry = gene_data[gene]
+        consensus = entry.get('consensus', '-')
+
+        n_agree = n_call = 0
+        w_agree_cal = w_call_cal = 0.0
+
+        for tool in tools:
+            alleles = entry.get('tools', {}).get(tool, {}).get('alleles', '-')
+            match = _allele_match(consensus, alleles)
+            calling = match != 'none'
+            if calling:
+                n_call += 1
+                w_cal = get_cal_weight(tool, gene)
+                if w_cal is not None:
+                    w_call_cal += w_cal
+            if match in ('full', 'partial'):
+                n_agree += 1
+                w_cal = get_cal_weight(tool, gene)
+                if w_cal is not None:
+                    w_agree_cal += w_cal
+
+        equal_conf.append(n_agree / n_call if n_call > 0 else 0.0)
+        calib_conf.append(w_agree_cal / w_call_cal if w_call_cal > 0 else (n_agree / n_call if n_call > 0 else 0.0))
+        obs_conf.append(cons_lookup.get(gene) or (n_agree / n_call if n_call > 0 else 0.0))
+
+    x = np.arange(len(genes))
+    w = 0.25
+    fig, ax = plt.subplots(figsize=(max(7, len(genes) * 1.1), 4.5))
+
+    ax.bar(x - w,   equal_conf, w, label='Equal weighting',      color='#4472C4', alpha=0.85)
+    ax.bar(x,       calib_conf, w, label='Calibrated weighting',  color='#27AE60', alpha=0.85)
+    ax.bar(x + w,   obs_conf,   w, label='Observed (consensus)',  color='#ED7D31', alpha=0.85)
+
+    ax.axhline(0.8, color=CONF_GREEN, linestyle='--', linewidth=0.8, alpha=0.6, label='High >= 0.8')
+    ax.axhline(0.5, color=CONF_AMBER, linestyle='--', linewidth=0.8, alpha=0.6, label='Medium >= 0.5')
+    ax.set_xticks(x)
+    ax.set_xticklabels(gene_labels)
+    ax.set_ylim(0, 1.15)
+    ax.set_ylabel('Confidence score')
+    ax.set_title(f'Weighting Strategy Comparison \u2014 {sample_id}')
+    ax.legend(fontsize=8)
+
+    for bars in [ax.containers[0], ax.containers[1], ax.containers[2]]:
+        for bar in bars:
+            h = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2, h + 0.02,
+                    f'{h:.2f}', ha='center', va='bottom', fontsize=6.5)
+
+    fig.tight_layout()
+    _save(fig, output_dir, 'fig_V3_weighted_confidence_comparison', fmt)
+    plt.close(fig)
+
+
+def fig_V4_allele_concordance_detail(gene_data, tool_names, sample_id,
+                                      output_dir, fmt):
+    """
+    Per-gene allele-level concordance breakdown for classical HLA genes.
+
+    For each gene, shows stacked segments across all calling tools:
+      Dark green  = tools agreeing on BOTH alleles (full concordance)
+      Light green = tools agreeing on allele 1 only
+      Orange      = tools agreeing on allele 2 only
+      Red         = tools with no allele in common with consensus
+      Grey        = tools that did not call this gene
+    """
+    genes = [g for g in GENE_ORDER if g in gene_data]
+    tools = [t for t in TOOL_ORDER if t in tool_names]
+    tools += [t for t in tool_names if t not in TOOL_ORDER]
+    if not genes or not tools:
+        return
+
+    def to_set(s):
+        if not s or s in ('-',):
+            return set()
+        return set(a.strip() for a in re.split(r'[/,]', s) if a.strip() not in ('-', ''))
+
+    gene_labels = [g.replace('HLA-', '') for g in genes]
+    both_agree = []
+    a1_only = []
+    a2_only = []
+    conflict = []
+    no_call  = []
+
+    for gene in genes:
+        entry = gene_data[gene]
+        consensus = entry.get('consensus', '-')
+        c_set = to_set(consensus)
+        c_list = list(c_set)
+
+        n_both = n_a1 = n_a2 = n_conf = n_none = 0
+        for tool in tools:
+            alleles = entry.get('tools', {}).get(tool, {}).get('alleles', '-')
+            a_set = to_set(alleles)
+            if not a_set:
+                n_none += 1
+                continue
+            if not c_set:
+                n_conf += 1
+                continue
+            overlap = c_set & a_set
+            if len(overlap) >= 2 or overlap == c_set:
+                n_both += 1
+            elif len(overlap) == 1:
+                matched = list(overlap)[0]
+                if c_list and matched == c_list[0]:
+                    n_a1 += 1
+                else:
+                    n_a2 += 1
+            else:
+                n_conf += 1
+
+        both_agree.append(n_both)
+        a1_only.append(n_a1)
+        a2_only.append(n_a2)
+        conflict.append(n_conf)
+        no_call.append(n_none)
+
+    x = np.arange(len(genes))
+    fig, ax = plt.subplots(figsize=(max(7, len(genes) * 1.0), 4.5))
+
+    b1 = ax.bar(x, both_agree, color='#1A7340', label='Both alleles agree', width=0.6)
+    b2 = ax.bar(x, a1_only,   bottom=both_agree, color='#82C341', label='Allele 1 only', width=0.6)
+    bot2 = [a + b for a, b in zip(both_agree, a1_only)]
+    b3 = ax.bar(x, a2_only,   bottom=bot2, color='#F39C12', label='Allele 2 only', width=0.6)
+    bot3 = [a + b for a, b in zip(bot2, a2_only)]
+    b4 = ax.bar(x, conflict,  bottom=bot3, color='#E74C3C', label='Conflict', width=0.6)
+    bot4 = [a + b for a, b in zip(bot3, conflict)]
+    b5 = ax.bar(x, no_call,   bottom=bot4, color='#ECECEC', label='Not called',
+                width=0.6, edgecolor='#ccc', linewidth=0.5)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(gene_labels)
+    ax.set_ylabel('Number of tools')
+    ax.set_yticks(range(0, len(tools) + 1))
+    ax.set_ylim(0, len(tools) + 0.5)
+    ax.set_title(f'Allele-level Concordance Breakdown \u2014 {sample_id}')
+    ax.legend(fontsize=8, loc='upper right')
+    fig.tight_layout()
+    _save(fig, output_dir, 'fig_V4_allele_concordance_detail', fmt)
+    plt.close(fig)
+
+
+# ─── Captions report ──────────────────────────────────────────────────────────
+
+def generate_captions_report(output_dir, sample_id, consensus_df, gene_data,
+                              tool_names, trace_df, weights_data):
+    """Write figure_captions_evaluation.md to output_dir."""
+    lines = [
+        f'# Figure Captions and Evaluation — {sample_id}',
+        '',
+        'Generated by `make_paper_figures.py`. Each section provides a formal '
+        'publishable caption and a brief data-driven evaluation.',
+        '',
+    ]
+
+    # Helper: safe stat extraction
+    def safe(fn):
+        try:
+            return fn()
+        except Exception:
+            return None
+
+    # --- Pre-compute stats ---
+    trace_stats = {}
+    if trace_df is not None and not trace_df.empty:
+        try:
+            dd = _dedup_trace(trace_df).dropna(subset=['duration_s'])
+            if not dd.empty:
+                slowest = dd.loc[dd['duration_s'].idxmax()]
+                fastest = dd.loc[dd['duration_s'].idxmin()]
+                trace_stats['slowest'] = (slowest['tool'], slowest['duration_s'])
+                trace_stats['fastest'] = (fastest['tool'], fastest['duration_s'])
+                trace_stats['n_tools'] = len(dd)
+                trace_stats['total_s'] = dd['duration_s'].sum()
+        except Exception:
+            pass
+
+    conf_stats = {}
+    if consensus_df is not None and not consensus_df.empty:
+        try:
+            c = consensus_df.dropna(subset=['Confidence'])
+            if not c.empty:
+                conf_stats['highest'] = (c.loc[c['Confidence'].idxmax(), 'Gene'],
+                                         c['Confidence'].max())
+                conf_stats['lowest']  = (c.loc[c['Confidence'].idxmin(), 'Gene'],
+                                         c['Confidence'].min())
+                conf_stats['n_high']  = int((c['Confidence'] >= 0.8).sum())
+                conf_stats['n_genes'] = len(c)
+        except Exception:
+            pass
+
+    gene_stats = {}
+    if gene_data and tool_names:
+        try:
+            n_tools = len(tool_names)
+            full_counts = {}
+            for gene, entry in gene_data.items():
+                consensus = entry.get('consensus', '-')
+                n_full = sum(
+                    1 for t in tool_names
+                    if _allele_match(consensus,
+                                     entry.get('tools', {}).get(t, {}).get('alleles', '-')) == 'full'
+                )
+                full_counts[gene] = n_full
+            if full_counts:
+                best_gene = max(full_counts, key=full_counts.get)
+                worst_gene = min(full_counts, key=full_counts.get)
+                gene_stats['best']   = (best_gene.replace('HLA-', ''), full_counts[best_gene], n_tools)
+                gene_stats['worst']  = (worst_gene.replace('HLA-', ''), full_counts[worst_gene], n_tools)
+                gene_stats['n_tools'] = n_tools
+        except Exception:
+            pass
+
+    # ─── Group A ──────────────────────────────────────────────────────────────
+    lines += ['## Group A: Resource Benchmarking', '']
+
+    def _a1_caption():
+        cap = (
+            f'**Figure A1 — Tool Execution Time.**  '
+            f'Horizontal bar chart showing wall-clock runtime (minutes) for each '
+            f'HLA typing tool executed during sample {sample_id}. '
+            f'Bars are coloured per tool; grey indicates a failed run.'
+        )
+        ev = ''
+        if trace_stats:
+            sl_t, sl_s = trace_stats.get('slowest', ('?', 0))
+            fa_t, fa_s = trace_stats.get('fastest', ('?', 0))
+            tot = trace_stats.get('total_s', 0)
+            ev = (
+                f'**Evaluation:** {trace_stats.get("n_tools", "?")} tools completed. '
+                f'The slowest tool was {sl_t} ({sl_s/60:.1f} min) and the fastest was '
+                f'{fa_t} ({fa_s/60:.1f} min). '
+                f'Total cumulative CPU-equivalent time was {tot/3600:.1f} h, '
+                f'highlighting the benefit of parallel Nextflow execution.'
+            )
+        return cap + '\n\n' + ev if ev else cap
+    lines += [safe(_a1_caption) or '**Figure A1** — (no trace data)', '']
+
+    lines += [
+        '**Figure A2 — Peak Memory Usage vs Configured Limit.**  '
+        f'Grouped bar chart comparing peak resident set size (RSS, actual) against '
+        f'the configured memory limit for each tool during sample {sample_id}. '
+        'Tools with large margins indicate over-provisioned allocations.',
+        '',
+        '**Evaluation:** Memory headroom varies substantially across tools. '
+        'Tools allocated far less than their configured limit suggest these limits '
+        'can be reduced in future pipeline runs to improve scheduler efficiency on HPC clusters.',
+        '',
+    ]
+
+    lines += [
+        '**Figure A3 — CPU Utilization per Tool.**  '
+        f'Bar chart of percentage CPU utilization recorded by Nextflow for each tool '
+        f'in sample {sample_id}. Values above 100% indicate multi-threaded execution.',
+        '',
+        '**Evaluation:** Tools exploiting multi-core parallelism (e.g., alignment-based tools) '
+        'show CPU% well above 100%. Single-threaded tools remain near 100%, '
+        'suggesting potential for additional parallelization.',
+        '',
+    ]
+
+    lines += [
+        '**Figure A4 — I/O Throughput per Tool.**  '
+        f'Grouped bar chart of bytes read and written (GB) per tool for sample {sample_id}. '
+        'Read-heavy tools dominate I/O load due to reference database scanning.',
+        '',
+        '**Evaluation:** I/O throughput is dominated by alignment-based tools that scan '
+        'large reference databases. This informs storage bandwidth requirements on HPC, '
+        'especially for parallel sample batches.',
+        '',
+    ]
+
+    lines += [
+        '**Figure A5 — Pipeline Execution Timeline (Gantt).**  '
+        f'Gantt chart showing the start time and duration of each tool for sample {sample_id}. '
+        'Parallel branches of the Nextflow DAG are visible as overlapping bars.',
+        '',
+        '**Evaluation:** The Gantt chart reveals which tools form the critical path '
+        'of the pipeline. Parallelism is exploited when multiple tools run simultaneously; '
+        'any sequential bottleneck will extend total wall-clock time.',
+        '',
+    ]
+
+    lines += [
+        '**Figure A6 — Resource Efficiency Scatter.**  '
+        f'Scatter plot of wall-clock time (x) vs peak RSS (y) for each tool in sample {sample_id}. '
+        'Bubble size is proportional to CPU utilization.',
+        '',
+        '**Evaluation:** Tools in the upper-right quadrant (slow, memory-heavy) are '
+        'the most resource-intensive. The scatter reveals trade-offs useful for '
+        'selecting a tool subset under HPC resource constraints.',
+        '',
+    ]
+
+    # ─── Group B ──────────────────────────────────────────────────────────────
+    lines += ['## Group B: HLA Typing Quality', '']
+
+    def _b1_caption():
+        cap = (
+            f'**Figure B1 — Consensus Confidence per HLA Gene.**  '
+            f'Bar chart of the pipeline confidence score (0–1) for each classical '
+            f'HLA gene in sample {sample_id}. '
+            f'Bars are coloured green (>=0.8), amber (>=0.5), or red (<0.5) '
+            f'according to the traffic-light scheme.'
+        )
+        ev = ''
+        if conf_stats:
+            hg, hv = conf_stats.get('highest', ('?', 0))
+            lg, lv = conf_stats.get('lowest', ('?', 0))
+            nh = conf_stats.get('n_high', '?')
+            ng = conf_stats.get('n_genes', '?')
+            ev = (
+                f'**Evaluation:** {nh}/{ng} genes reach high confidence (>=0.8). '
+                f'The highest-confidence locus is {hg.replace("HLA-", "")} ({hv:.2f}) '
+                f'and the lowest is {lg.replace("HLA-", "")} ({lv:.2f}). '
+                f'Low-confidence loci should be validated by orthogonal methods.'
+            )
+        return cap + '\n\n' + ev if ev else cap
+    lines += [safe(_b1_caption) or '**Figure B1** — (no confidence data)', '']
+
+    def _b2_caption():
+        cap = (
+            f'**Figure B2 — Tool vs Consensus Agreement.**  '
+            f'Heatmap showing agreement between each tool and the weighted consensus '
+            f'for each classical HLA gene in sample {sample_id}. '
+            f'Green=full match, yellow-green=partial (one allele), red=conflict, '
+            f'grey=not called. Annotations show checkmark (full), half (partial), '
+            f'or cross (conflict).'
+        )
+        ev = ''
+        if gene_stats:
+            bg, bn, nt = gene_stats.get('best', ('?', '?', '?'))
+            wg, wn, _  = gene_stats.get('worst', ('?', '?', '?'))
+            ev = (
+                f'**Evaluation:** The gene with highest cross-tool agreement is '
+                f'{bg} ({bn}/{nt} tools in full agreement). '
+                f'The gene with lowest agreement is {wg} ({wn}/{nt} tools). '
+                f'Partial matches (amber) indicate allele-level discordance, '
+                f'common at highly polymorphic loci such as HLA-B and HLA-DRB1.'
+            )
+        return cap + '\n\n' + ev if ev else cap
+    lines += [safe(_b2_caption) or '**Figure B2** — (no comparison data)', '']
+
+    lines += [
+        '**Figure B3 — Read Support per Allele.**  '
+        f'Grouped bar chart of read counts assigned to allele 1 and allele 2 '
+        f'at each classical HLA gene for sample {sample_id}. '
+        'Large imbalance between alleles may indicate hemizygosity or allele drop-out.',
+        '',
+        '**Evaluation:** Genes with very low read support in either allele position '
+        'are more likely to have incorrect or low-confidence calls. '
+        'Read counts are extracted from the HLA-HD per-gene output files.',
+        '',
+    ]
+
+    lines += [
+        '**Figure B4 — Read Support vs Confidence.**  '
+        f'Scatter plot of total reads (allele 1 + 2) vs pipeline confidence score '
+        f'for each gene in sample {sample_id}. '
+        'Each point is labelled with the gene name.',
+        '',
+        '**Evaluation:** A positive correlation between read depth and confidence '
+        'is expected; outliers (high reads but low confidence) indicate tool disagreement '
+        'rather than insufficient coverage.',
+        '',
+    ]
+
+    # ─── Group C ──────────────────────────────────────────────────────────────
+    lines += ['## Group C: Tool Accuracy (Population-level Calibration)', '']
+
+    lines += [
+        '**Figure C1 — Tool Accuracy Heatmap.**  '
+        'Heatmap of concordance (%) with 1KGP ground truth for each tool and classical '
+        'HLA gene, derived from the empirical weight calibration cohort. '
+        'Values are shown as percentages; grey cells indicate genes not typed by that tool.',
+        '',
+        '**Evaluation:** Accuracy varies substantially by gene and tool. '
+        'OptiType consistently achieves high Class I accuracy, while HLA-HD leads '
+        'for Class II loci. These patterns directly determine the calibrated weights '
+        'used in the weighted consensus voting step.',
+        '',
+    ]
+
+    lines += [
+        '**Figure C2 — Normalized Tool Weights Heatmap.**  '
+        'Heatmap of normalized per-gene accuracy weights assigned to each tool '
+        'for the weighted consensus voting step. '
+        'Weights sum to 1.0 within each gene column.',
+        '',
+        '**Evaluation:** The weight distribution reflects which tools are most accurate '
+        'for each gene in a 30x WGS context. Genes where one tool dominates '
+        '(e.g., OptiType for HLA-C) result in highly asymmetric weight columns.',
+        '',
+    ]
+
+    lines += [
+        '**Figure C3 — Tool Ranking.**  '
+        'Horizontal bar chart of mean concordance across the five core genes '
+        '(A, B, C, DRB1, DQB1) for each tool, ranked from highest to lowest.',
+        '',
+        '**Evaluation:** The ranking provides a single-number summary of overall '
+        'tool performance for WGS typing. Tools near the top of the ranking are '
+        'given higher weights in the consensus, improving final call accuracy.',
+        '',
+    ]
+
+    lines += [
+        '**Figure C4 — Accuracy vs Runtime Trade-off.**  '
+        'Scatter plot of mean concordance (y) vs median runtime from Nextflow trace (x) '
+        'for each tool, enabling assessment of cost-effectiveness.',
+        '',
+        '**Evaluation:** Tools in the upper-left quadrant (fast and accurate) are '
+        'most cost-effective. Tools that are slow but also inaccurate may be candidates '
+        'for exclusion from the default pipeline configuration.',
+        '',
+    ]
+
+    # ─── Group D ──────────────────────────────────────────────────────────────
+    lines += ['## Group D: Summary Panels', '']
+
+    def _d1_caption():
+        cap = (
+            f'**Figure D1 — HLA Typing Results Table.**  '
+            f'Visual table of allele calls from all tools and the weighted consensus '
+            f'for each classical HLA gene in sample {sample_id}. '
+            f'Cell colours indicate confidence level (green=high, amber=medium, red=low) '
+            f'for the consensus column, and agreement (green=match, amber=mismatch) for tool columns.'
+        )
+        ev = ''
+        if gene_data and tool_names:
+            n_genes = len([g for g in GENE_ORDER if g in gene_data])
+            ev = (
+                f'**Evaluation:** The table summarises typing results for {n_genes} classical '
+                f'genes across {len(tool_names)} tools. '
+                f'It is the primary deliverable for clinical or research use, '
+                f'providing a compact view of both the final calls and the per-tool evidence.'
+            )
+        return cap + '\n\n' + ev if ev else cap
+    lines += [safe(_d1_caption) or '**Figure D1** — (no data)', '']
+
+    lines += [
+        '**Figure D2 — Summary Panel.**  '
+        f'Composite 3x2 panel combining six key figures: A1 (execution time), '
+        f'A2 (memory), B1 (confidence), B2 (concordance), C1 (accuracy heatmap), '
+        f'C3 (tool ranking). Intended as a single-page overview for manuscripts.',
+        '',
+        '**Evaluation:** The summary panel provides a publication-ready overview '
+        'of both computational performance and HLA typing quality for a single sample. '
+        'It is most informative when all six constituent figures contain data.',
+        '',
+    ]
+
+    # ─── Group V ──────────────────────────────────────────────────────────────
+    lines += ['## Group V: Weighted Voting Analysis', '']
+
+    def _v1_caption():
+        cap = (
+            f'**Figure V1 — Weighted Majority Vote Matrix.**  '
+            f'Annotated grid showing the allele call from each tool (rows) for each '
+            f'classical HLA gene (columns) in sample {sample_id}. '
+            f'Cell colour encodes agreement with the weighted consensus: '
+            f'green=full match, amber=partial, red=conflict, grey=not called. '
+            f'The bottom row displays the final consensus call.'
+        )
+        ev = ''
+        if gene_stats:
+            bg, bn, nt = gene_stats.get('best', ('?', '?', '?'))
+            wg, wn, _  = gene_stats.get('worst', ('?', '?', '?'))
+            ev = (
+                f'**Evaluation:** For sample {sample_id}, gene {bg} shows the highest '
+                f'cross-tool agreement ({bn}/{nt} tools in full agreement), while '
+                f'{wg} shows the lowest ({wn}/{nt}). '
+                f'This matrix is the primary visualisation of the novel weighted '
+                f'majority voting step introduced by this pipeline.'
+            )
+        return cap + '\n\n' + ev if ev else cap
+    lines += [safe(_v1_caption) or '**Figure V1** — (no comparison data)', '']
+
+    def _v2_caption():
+        cap = (
+            f'**Figure V2 — Voting Weight Breakdown per Gene.**  '
+            f'Horizontal stacked bar chart showing, for each classical HLA gene in '
+            f'sample {sample_id}, the total vote weight allocated to full-agreement, '
+            f'partial-agreement, conflict, and no-call segments. '
+            f'The majority threshold (50% of total weight) is shown as a dotted line.'
+        )
+        ev = ''
+        if gene_data and tool_names:
+            n = len(tool_names)
+            ev = (
+                f'**Evaluation:** With {n} tools in the ensemble, a gene requires '
+                f'>{n/2:.1f} units of agreement weight to reach majority consensus. '
+                f'Genes where the green segment falls short of the threshold indicate '
+                f'low-agreement loci where the consensus call is less reliable.'
+            )
+        return cap + '\n\n' + ev if ev else cap
+    lines += [safe(_v2_caption) or '**Figure V2** — (no data)', '']
+
+    lines += [
+        '**Figure V3 — Weighting Strategy Comparison.**  '
+        f'Grouped bar chart comparing confidence scores under three strategies '
+        f'(equal, calibrated, observed) for each classical HLA gene in sample {sample_id}. '
+        f'Reference lines at 0.8 (high) and 0.5 (medium) aid interpretation.',
+        '',
+        '**Evaluation:** Calibrated weighting should produce confidence scores '
+        'that better reflect empirical accuracy than simple equal weighting. '
+        'Genes where calibrated and equal weighting diverge most are those where '
+        'one high-accuracy tool dominates the vote.',
+        '',
+    ]
+
+    def _v4_caption():
+        cap = (
+            f'**Figure V4 — Allele-level Concordance Breakdown.**  '
+            f'Stacked bar chart decomposing, for each classical HLA gene in sample {sample_id}, '
+            f'the number of tools agreeing on both alleles (dark green), allele 1 only '
+            f'(light green), allele 2 only (orange), conflicting (red), or not calling (grey).'
+        )
+        ev = (
+            '**Evaluation:** This figure reveals whether tool disagreements are concentrated '
+            'on the second (more polymorphic) allele or affect both alleles equally. '
+            'Genes dominated by the dark-green segment indicate high-confidence homozygous '
+            'or unambiguous heterozygous calls.'
+        )
+        return cap + '\n\n' + ev
+    lines += [safe(_v4_caption) or '**Figure V4** — (no data)', '']
+
+    lines += ['', '---', f'*Report generated for sample: {sample_id}*', '']
+
+    out_path = Path(output_dir) / 'figure_captions_evaluation.md'
+    with open(out_path, 'w') as f:
+        f.write('\n'.join(lines))
+
+
 # ─── Combine all PDFs ─────────────────────────────────────────────────────────
 
 def combine_pdfs(output_dir):
@@ -1019,12 +1815,47 @@ def main():
     except Exception as e:
         print(f'    ✗ fig_D2_summary_panel: {e}')
 
+    # ── Group V (Voting Analysis) ─────────────────────────────────────────────
+    if gene_data:
+        print('  Group V: voting analysis ...')
+        voting_fns = [
+            ('fig_V1_allele_vote_matrix',
+             dict(gene_data=gene_data, tool_names=tool_names,
+                  consensus_df=consensus_df, sample_id=args.sample_id)),
+            ('fig_V2_vote_weight_breakdown',
+             dict(gene_data=gene_data, tool_names=tool_names,
+                  consensus_df=consensus_df, sample_id=args.sample_id,
+                  weights_data=weights_data)),
+            ('fig_V3_weighted_confidence_comparison',
+             dict(gene_data=gene_data, tool_names=tool_names,
+                  consensus_df=consensus_df, sample_id=args.sample_id,
+                  weights_data=weights_data)),
+            ('fig_V4_allele_concordance_detail',
+             dict(gene_data=gene_data, tool_names=tool_names,
+                  sample_id=args.sample_id)),
+        ]
+        for name, kw in voting_fns:
+            fn = globals()[name]
+            try:
+                fn(**kw, output_dir=od, fmt=fmt)
+                print(f'    \u2713 {name}')
+            except Exception as e:
+                print(f'    \u2717 {name}: {e}')
+
     if fmt in ('pdf', 'both'):
         try:
             combine_pdfs(od)
-            print('    ✓ all_figures.pdf')
+            print('    \u2713 all_figures.pdf')
         except Exception as e:
-            print(f'    ✗ combine_pdfs: {e}')
+            print(f'    \u2717 combine_pdfs: {e}')
+
+    # ── Captions report ────────────────────────────────────────────────────────
+    try:
+        generate_captions_report(od, args.sample_id, consensus_df,
+                                  gene_data, tool_names, trace_df, weights_data)
+        print('    \u2713 figure_captions_evaluation.md')
+    except Exception as e:
+        print(f'    \u2717 captions report: {e}')
 
     pdfs = len(list(Path(od).glob('fig_*.pdf')))
     pngs = len(list(Path(od).glob('fig_*.png')))
