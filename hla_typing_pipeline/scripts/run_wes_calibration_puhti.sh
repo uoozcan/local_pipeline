@@ -173,78 +173,91 @@ echo "==================================================================="
 echo ""
 
 #-----------------------------------------------------------------------------
-# Download exome sequence index (once; cached)
-# Format: tab-sep, columns include SAMPLE_NAME and FASTQ_FILE (relative path)
-# We use it to build exact BAM URLs per sample.
+# Build per-sample BAM URL map: SAMPLE -> full BAM FTP URL
+#
+# Root cause of earlier failure: 20130502.phase3.exome.sequence.index lists
+# raw FASTQ files, not BAM alignments. BAM URLs must be constructed from the
+# 1KGP population panel which maps sample_id -> population code (e.g. YRI).
+#
+# BAM URL pattern:
+#   ftp://.../phase3/data/{SAMPLE}/exome_alignment/
+#     {SAMPLE}.mapped.ILLUMINA.bwa.{POP}.exome.{DATE}.bam
+# Dates tried in order: 20121211, 20130415, 20120522
 #-----------------------------------------------------------------------------
-INDEX_FILE="${INDEX_DIR}/phase3_exome.sequence.index"
-if [[ ! -f "$INDEX_FILE" ]]; then
-    echo "[INFO] Downloading 1KGP Phase 3 exome sequence index..."
+PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20130502.ALL.panel"
+PANEL_FILE="${INDEX_DIR}/1kgp_panel.tsv"
+URL_MAP="${INDEX_DIR}/sample_bam_urls.tsv"
+
+# Download population panel (cached)
+if [[ ! -f "$PANEL_FILE" ]]; then
+    echo "[INFO] Downloading 1KGP population panel..."
     if [[ "$DRY_RUN" == "false" ]]; then
-        wget -q -O "${INDEX_FILE}" "${EBI_EXOME_INDEX}" \
-            || curl -s -o "${INDEX_FILE}" "${EBI_EXOME_INDEX}" \
-            || { echo "[ERROR] Could not download exome sequence index from EBI FTP"; exit 1; }
-        echo "[OK] Index saved: ${INDEX_FILE} ($(wc -l < "$INDEX_FILE") entries)"
+        wget -q -O "${PANEL_FILE}" "${PANEL_URL}" \
+            || curl -s -o "${PANEL_FILE}" "${PANEL_URL}" \
+            || { echo "[ERROR] Could not download population panel from EBI"; exit 1; }
+        echo "[OK] Panel saved: ${PANEL_FILE} ($(wc -l < "$PANEL_FILE") entries)"
     else
-        echo "[DRY-RUN] wget -q -O ${INDEX_FILE} ${EBI_EXOME_INDEX}"
+        echo "[DRY-RUN] wget -q -O ${PANEL_FILE} ${PANEL_URL}"
     fi
 else
-    echo "[INFO] Using cached index: ${INDEX_FILE}"
+    echo "[INFO] Using cached population panel: ${PANEL_FILE}"
 fi
 
-#-----------------------------------------------------------------------------
-# Build per-sample BAM URL map: SAMPLE -> full BAM FTP URL
-# Columns in the index (header line starts with STUDY_ID):
-#   col 1 = STUDY_ID, col 2 = SAMPLE_NAME, col 28 = FILE (relative path)
-# The relative path starts with "data/" so FTP base = ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/
-#-----------------------------------------------------------------------------
-URL_MAP="${INDEX_DIR}/sample_bam_urls.tsv"
+# (Re)build URL map whenever the panel changes or map is missing
+# Delete stale map built from the wrong (FASTQ) index
+if [[ -f "$URL_MAP" ]]; then
+    N_MAPPED=$(wc -l < "$URL_MAP")
+    if [[ "$N_MAPPED" -eq 0 ]]; then
+        echo "[INFO] Stale empty URL map found — rebuilding from population panel"
+        rm -f "$URL_MAP"
+    fi
+fi
+
 if [[ ! -f "$URL_MAP" ]] && [[ "$DRY_RUN" == "false" ]]; then
-    echo "[INFO] Building sample→BAM URL map..."
+    echo "[INFO] Building sample→BAM URL map from population panel..."
     python3 - << PYEOF
-import sys, re
+import sys, os
 
-index_file = "${INDEX_FILE}"
+panel_file  = "${PANEL_FILE}"
+sample_list = "${ALL_SAMPLES_LIST}"
 url_map_out = "${URL_MAP}"
-ftp_base = "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/"
+ftp_base    = "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data"
+# Dates to try in order (most samples use 20121211)
+DATES = ["20121211", "20130415", "20120522"]
 
-sample_urls = {}
-
-with open(index_file) as fh:
+# Load population panel: sample_id \t pop \t super_pop \t gender
+pop_map = {}
+with open(panel_file) as fh:
     for line in fh:
-        line = line.rstrip('\n')
-        if not line or line.startswith('STUDY_ID'):
+        line = line.strip()
+        if not line or line.startswith("sample"):
             continue
-        parts = line.split('\t')
-        if len(parts) < 28:
-            continue
-        sample = parts[9].strip()  # SAMPLE_NAME column (0-based index 9)
-        filepath = parts[0].strip() # FILE column (0-based index 0 in some versions)
-        # The index has FILE as first column starting with "data/"
-        # Detect which column has the BAM path
-        bam_col = None
-        for i, p in enumerate(parts):
-            if re.search(r'\.bam$', p) and 'exome' in p:
-                bam_col = i
-                break
-        if bam_col is None:
-            continue
-        bam_path = parts[bam_col].strip()
-        if not bam_path:
-            continue
-        # Strip leading slash or "vol1/ftp/phase3/" if already in path
-        bam_path = re.sub(r'^/vol1/ftp/phase3/', '', bam_path)
-        bam_path = re.sub(r'^phase3/', '', bam_path)
-        url = ftp_base + bam_path.lstrip('/')
-        # Keep the first BAM per sample (typically the primary alignment)
-        if sample not in sample_urls:
-            sample_urls[sample] = url
+        parts = line.split()
+        if len(parts) >= 2:
+            pop_map[parts[0]] = parts[1]   # sample_id -> pop (e.g. YRI)
 
-with open(url_map_out, 'w') as fout:
-    for sample, url in sorted(sample_urls.items()):
-        fout.write(f"{sample}\t{url}\n")
+# Load sample list
+with open(sample_list) as fh:
+    samples = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
 
-print(f"[OK] URL map written: {url_map_out} ({len(sample_urls)} samples)")
+found, missing = 0, []
+with open(url_map_out, "w") as fout:
+    for sample in samples:
+        pop = pop_map.get(sample)
+        if not pop:
+            missing.append(sample)
+            continue
+        # Use the first date as primary URL; the extraction script tries all dates
+        url = f"{ftp_base}/{sample}/exome_alignment/{sample}.mapped.ILLUMINA.bwa.{pop}.exome.{DATES[0]}.bam"
+        # Also write alt-date URLs as fallbacks (tab-separated after main URL)
+        alts = [f"{ftp_base}/{sample}/exome_alignment/{sample}.mapped.ILLUMINA.bwa.{pop}.exome.{d}.bam"
+                for d in DATES[1:]]
+        fout.write(f"{sample}\t{url}\t{'|'.join(alts)}\n")
+        found += 1
+
+print(f"[OK] URL map: {found} samples mapped, {len(missing)} missing from panel")
+if missing:
+    print(f"[WARN] Not in panel: {', '.join(missing)}", file=sys.stderr)
 PYEOF
 fi
 
@@ -291,21 +304,41 @@ if [[ -f "$R1" ]] && [[ -f "$R2" ]]; then
     exit 0
 fi
 
-# Look up BAM URL
-BAM_URL=$(grep -P "^${SAMPLE}\t" "$URL_MAP" | cut -f2 || true)
-if [[ -z "$BAM_URL" ]]; then
+# Look up BAM URL (col 2 = primary; col 3 = pipe-separated alt-date fallbacks)
+LINE=$(grep -P "^${SAMPLE}\t" "$URL_MAP" || true)
+if [[ -z "$LINE" ]]; then
     echo "[ERROR] No BAM URL found for sample ${SAMPLE} in URL map" >&2
     exit 1
 fi
-echo "[INFO] BAM URL: ${BAM_URL}"
+PRIMARY_URL=$(echo "$LINE" | cut -f2)
+ALT_URLS=$(echo "$LINE" | cut -f3 | tr '|' ' ')
 
-# Stream HLA region from remote BAM → paired FASTQs
-# samtools view requires the remote .bai index to be present at ${BAM_URL}.bai
-mkdir -p "${FASTQ_DIR}"
+# Try primary URL, then alt-date fallbacks
 TMP_BAM="${FASTQ_DIR}/${SAMPLE}_hla_tmp.bam"
+mkdir -p "${FASTQ_DIR}"
+BAM_URL=""
+for URL in ${PRIMARY_URL} ${ALT_URLS}; do
+    echo "[INFO] Trying: ${URL}"
+    if samtools view -b -h -o "${TMP_BAM}" "${URL}" "${HLA_REGION}" 2>/dev/null; then
+        NREADS=$(samtools view -c "${TMP_BAM}" 2>/dev/null || echo 0)
+        if [[ "${NREADS}" -gt 0 ]]; then
+            BAM_URL="${URL}"
+            echo "[OK] HLA reads: ${NREADS} from ${URL}"
+            break
+        else
+            echo "[WARN] 0 reads from ${URL} — trying next"
+            rm -f "${TMP_BAM}"
+        fi
+    else
+        echo "[WARN] samtools failed for ${URL} — trying next"
+        rm -f "${TMP_BAM}"
+    fi
+done
 
-samtools view -b -h -o "${TMP_BAM}" "${BAM_URL}" "${HLA_REGION}"
-echo "[INFO] HLA reads: $(samtools view -c "$TMP_BAM")"
+if [[ -z "$BAM_URL" ]]; then
+    echo "[ERROR] Could not stream HLA reads for ${SAMPLE} from any URL" >&2
+    exit 1
+fi
 
 # Name-sort and convert to FASTQ (paired; singletons discarded)
 samtools sort -n -@ 3 -m 2G -o "${TMP_BAM}.nsort.bam" "${TMP_BAM}"
