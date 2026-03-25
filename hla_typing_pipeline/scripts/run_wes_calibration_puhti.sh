@@ -346,12 +346,15 @@ samtools fastq \
     -1 "${R1}" \
     -2 "${R2}" \
     -s /dev/null \
+    -0 /dev/null \
     "${TMP_BAM}.nsort.bam"
 
 rm -f "${TMP_BAM}" "${TMP_BAM}.nsort.bam"
 
+N_READS=$(zcat "${R1}" | wc -l)
+N_PAIRS=$(( N_READS / 4 ))
 echo "[OK] FASTQs:"
-echo "  R1: ${R1} ($(wc -l < <(zcat "${R1}") / 4) reads)"
+echo "  R1: ${R1} (${N_PAIRS} read pairs)"
 echo "  R2: ${R2}"
 EXTRACTEOF
 
