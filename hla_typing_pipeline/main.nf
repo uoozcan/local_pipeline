@@ -1096,5 +1096,46 @@ workflow.onComplete {
         } else {
             log.warn "No trace file found in ${pipelineInfoDir} — skipping pipeline metrics"
         }
+
+        // Generate scientific figures for each sample with consensus results
+        def outdirFile = file("${params.outdir}")
+        def consensusFiles = []
+        outdirFile.eachFileRecurse { f ->
+            if (f.name.endsWith('_consensus.txt')) consensusFiles << f
+        }
+        if (consensusFiles) {
+            def traceArg = ""
+            def traceFiles2 = pipelineInfoDir.listFiles()?.findAll { it.name.startsWith("trace_") && it.name.endsWith(".txt") }
+            if (traceFiles2) {
+                def latestTrace2 = traceFiles2.sort { it.lastModified() }.last()
+                traceArg = "--trace_file ${latestTrace2}"
+            }
+            def weightsArg = params.weights_file ? "--weights_file ${params.weights_file}" : ""
+            def useContainer = params.container_dir && file("${params.container_dir}/hla_postprocess.sif").exists()
+            consensusFiles.each { consensusFile ->
+                def sampleId = consensusFile.name.replaceFirst('_consensus\\.txt$', '')
+                def sampleDir = consensusFile.parent
+                def comparisonFile = new File("${sampleDir}/${sampleId}_comparison.txt")
+                if (!comparisonFile.exists()) {
+                    log.warn "No comparison file for ${sampleId} — skipping scientific figures"
+                    return
+                }
+                def figOutDir = "${sampleDir}/scientific_figures"
+                new File(figOutDir).mkdirs()
+                def scriptPath = "${projectDir}/bin/make_paper_figures.py"
+                def innerCmd = "python3 ${scriptPath} --consensus ${consensusFile} --comparison ${comparisonFile} ${traceArg} ${weightsArg} --sample_id ${sampleId} --output_dir ${figOutDir} --format both"
+                def cmd2 = useContainer
+                    ? "apptainer exec --bind /scratch:/scratch --bind /projappl:/projappl ${params.container_dir}/hla_postprocess.sif ${innerCmd}"
+                    : innerCmd
+                log.info "Generating scientific figures for ${sampleId} ..."
+                def proc2 = ["bash", "-c", cmd2].execute()
+                proc2.waitForOrKill(300_000)  // wait up to 5 min
+                if (proc2.exitValue() == 0) {
+                    log.info "Scientific figures saved to ${figOutDir}/"
+                } else {
+                    log.warn "make_paper_figures.py exited ${proc2.exitValue()} for ${sampleId} — check hla_postprocess.sif"
+                }
+            }
+        }
     }
 }
