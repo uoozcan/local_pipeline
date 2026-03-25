@@ -1328,8 +1328,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help='Ground-truth TSV (from download-gt or custom)')
     cal.add_argument('--results-dir', required=True,
                      help='Directory with per-tool subdirs of pipeline result files')
-    cal.add_argument('--data-type', required=True, choices=['wgs', 'rna'],
-                     help='Sequencing type (affects tool selection)')
+    cal.add_argument('--data-type', required=True, choices=['wgs', 'wes', 'rna'],
+                     help='Sequencing type (wgs, wes, or rna; stored in output JSON/TSV)')
     cal.add_argument('--resolution', default='2-field', choices=['2-field', '4-field'],
                      help='Allele resolution for comparison')
     cal.add_argument('--genes', default='A,B,C,DRB1,DQB1',

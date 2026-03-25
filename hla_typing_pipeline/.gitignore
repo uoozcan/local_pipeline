@@ -51,3 +51,8 @@ temp/
 
 # Databases (too large)
 hla_references/databases/
+
+# Allow config data files in conf/ (overrides parent .gitignore *.txt rule)
+!conf/*.txt
+!conf/*.tsv
+!conf/*.json

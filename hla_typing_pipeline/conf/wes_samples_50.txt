@@ -1,0 +1,64 @@
+# 50 1000 Genomes samples for WES HLA calibration
+# Balanced across 5 superpopulations (10 each)
+# All present in Gourraud 2014 ground-truth (PMID 24722506)
+# WES BAMs at EBI: ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data/{SAMPLE}/exome_alignment/
+#
+# AFR (YRI — Yoruba in Ibadan, Nigeria)
+NA18508
+NA18517
+NA19099
+NA19102
+NA19107
+NA19109
+NA19113
+NA19119
+NA19238
+NA19240
+#
+# EUR (CEU/GBR — Utah residents / British)
+HG00099
+HG00100
+HG00101
+HG00102
+NA06984
+NA06985
+NA07037
+NA10847
+NA12749
+NA12872
+#
+# EAS (CHB/JPT — Han Chinese / Japanese)
+NA18526
+NA18542
+NA18555
+NA18558
+NA18573
+NA18582
+NA18591
+NA18592
+NA18595
+NA18596
+#
+# AMR (CLM/PUR — Colombian / Puerto Rican)
+HG01112
+HG01113
+HG01125
+HG01130
+HG01131
+HG01136
+HG01140
+HG01148
+HG01149
+HG01161
+#
+# SAS (GIH — Gujarati Indian in Houston, TX)
+NA20502
+NA20503
+NA20504
+NA20505
+NA20506
+NA20507
+NA20508
+NA20509
+NA20510
+NA20511
