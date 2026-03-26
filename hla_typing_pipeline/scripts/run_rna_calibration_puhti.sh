@@ -287,6 +287,9 @@ with open(meta_file) as fh:
         if len(parts) <= max(i_sample, i_run, i_ftp):
             continue
         sample_id = parts[i_sample].strip()
+        # Strip project prefix if present (e.g. "GEUV:NA18501" -> "NA18501")
+        if ':' in sample_id:
+            sample_id = sample_id.split(':', 1)[1]
         if sample_id not in samples:
             continue
         ftp_paths = [p.strip() for p in parts[i_ftp].split(";") if p.strip()]
