@@ -11,6 +11,7 @@
 # NA18xxx YRI samples are 1KGP-only; Geuvadis uses NA19xxx YRI IDs
 # Confirmed in ENA ERP001942: NA18502, NA18505, NA18508 only
 # Replaced 6 non-Geuvadis NA18xxx + added NA19xxx YRI (Gourraud 2014 confirmed)
+# NA19127, NA19128 not in Geuvadis ERP001942 → replaced with NA19129, NA19130
 NA18502
 NA18505
 NA18508
@@ -19,8 +20,8 @@ NA19095
 NA19099
 NA19108
 NA19119
-NA19127
-NA19128
+NA19129
+NA19130
 #
 # EUR/CEU (Gourraud 2014 confirmed, present in Geuvadis ERP001942)
 NA06985
