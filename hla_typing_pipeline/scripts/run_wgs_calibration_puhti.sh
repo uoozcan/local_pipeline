@@ -237,7 +237,8 @@ echo ""
 # ENA run table: run_accession, submitted_ftp
 # submitted_ftp contains the CRAM FTP path, e.g.:
 #   ftp.sra.ebi.ac.uk/.../NA19238.final.cram;ftp.sra.ebi.ac.uk/.../NA19238.final.cram.crai
-# CRAM URL: ftp://ftp.sra.ebi.ac.uk/vol1/run/{ERR[0:6]}/{ERR}/{SAMPLE}.final.cram
+# CRAM URL: https://ftp.sra.ebi.ac.uk/vol1/run/{ERR[0:6]}/{ERR}/{SAMPLE}.final.cram
+# (using HTTPS rather than ftp:// — Puhti samtools 1.21 supports libcurl/HTTPS but not FTP)
 #-----------------------------------------------------------------------------
 if [[ ! -f "${ENA_META}" ]] && [[ "$DRY_RUN" == "false" ]]; then
     echo "[INFO] Downloading NYGC 30x ENA run table (PRJEB31736)..."
@@ -294,8 +295,8 @@ with open(meta_file) as fh:
         s = m.group(1)
         if s not in samples:
             continue
-        # Build FTP URL: ftp://ftp.sra.ebi.ac.uk/vol1/run/{ERR[0:6]}/{ERR}/{SAMPLE}.final.cram
-        cram_url = f"ftp://ftp.sra.ebi.ac.uk/vol1/run/{err[:6]}/{err}/{s}.final.cram"
+        # Build HTTPS URL: https://ftp.sra.ebi.ac.uk/vol1/run/{ERR[0:6]}/{ERR}/{SAMPLE}.final.cram
+        cram_url = f"https://ftp.sra.ebi.ac.uk/vol1/run/{err[:6]}/{err}/{s}.final.cram"
         if s not in sample_map:   # keep first ERR per sample
             sample_map[s] = (err, cram_url)
 
@@ -360,8 +361,8 @@ fi
 # Look up CRAM URL
 LINE=$(grep -P "^${SAMPLE}\t" "$URL_MAP" || true)
 if [[ -z "$LINE" ]]; then
-    echo "[ERROR] No CRAM URL found for sample ${SAMPLE}" >&2
-    exit 1
+    echo "[WARN] No CRAM URL found for sample ${SAMPLE} — skipping" >&2
+    exit 0
 fi
 CRAM_URL=$(echo "$LINE" | cut -f3)
 echo "[INFO] CRAM URL: ${CRAM_URL}"

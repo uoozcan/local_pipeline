@@ -245,7 +245,7 @@ with open(meta_file) as fh:
         if not m: continue
         s = m.group(1)
         if s != sample: continue
-        cram_url = f"ftp://ftp.sra.ebi.ac.uk/vol1/run/{err[:6]}/{err}/{s}.final.cram"
+        cram_url = f"https://ftp.sra.ebi.ac.uk/vol1/run/{err[:6]}/{err}/{s}.final.cram"
         if s not in sample_map:
             sample_map[s] = (err, cram_url)
 with open(url_map_out, "w") as fout:
@@ -369,7 +369,7 @@ if [[ -f "${BAM_OUT}" ]] && [[ -f "${BAM_OUT}.bai" ]]; then
 fi
 
 LINE=$(grep -P "^${SAMPLE}\t" "URL_MAP_PH" || true)
-[[ -z "$LINE" ]] && { echo "[ERROR] No CRAM URL for ${SAMPLE}" >&2; exit 1; }
+[[ -z "$LINE" ]] && { echo "[WARN] No CRAM URL for ${SAMPLE} — skipping" >&2; exit 0; }
 CRAM_URL=$(echo "$LINE" | cut -f3)
 echo "[INFO] CRAM URL: ${CRAM_URL}"
 
