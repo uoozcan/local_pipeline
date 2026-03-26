@@ -41,21 +41,27 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 TOOL_COLORS = {
-    "hlahd":    "#2196F3",   # blue
-    "optitype": "#4CAF50",   # green
-    "spechla":  "#FF9800",   # orange
-    "arcashla": "#9C27B0",   # purple
-    "xhla":     "#F44336",   # red
+    "hlahd":     "#2196F3",   # blue
+    "optitype":  "#4CAF50",   # green
+    "spechla":   "#FF9800",   # orange
+    "arcashla":  "#9C27B0",   # purple
+    "kourami":   "#F44336",   # red
+    "polysolver":"#00BCD4",   # cyan
+    "seq2hla":   "#FF99CC",   # pink
+    "t1k":       "#795548",   # brown
 }
 TOOL_LABELS = {
-    "hlahd":    "HLA-HD",
-    "optitype": "OptiType",
-    "spechla":  "SpecHLA",
-    "arcashla": "arcasHLA",
-    "xhla":     "xHLA",
+    "hlahd":     "HLA-HD",
+    "optitype":  "OptiType",
+    "spechla":   "SpecHLA",
+    "arcashla":  "arcasHLA",
+    "kourami":   "Kourami",
+    "polysolver":"PolySOLVER",
+    "seq2hla":   "seq2HLA",
+    "t1k":       "T1K",
 }
 GENE_ORDER = ["A", "B", "C", "DRB1", "DQB1"]
-EXCLUDE_TOOLS = {"hlala"}   # low N=1, all-zero
+EXCLUDE_TOOLS = {"hlala", "xhla"}   # hlala: N=1 all-zero; xhla: removed from pipeline
 
 STRATEGY_COLORS = {
     "equal":            "#9E9E9E",
@@ -124,29 +130,56 @@ def _gene_cols(df):
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
-def load_accuracy(conf_dir):
-    for name in ("tool_accuracy_wgs_v2.tsv", "tool_accuracy_wgs.tsv"):
-        p = conf_dir / name
-        if p.exists():
+def load_accuracy(conf_dir, data_type="wgs", explicit_path=None):
+    if explicit_path:
+        candidates = [Path(explicit_path)]
+    else:
+        dt = data_type or "wgs"
+        if dt == "wgs":
+            names = ["tool_accuracy_wgs_v3.tsv", "tool_accuracy_wgs_v2.tsv", "tool_accuracy_wgs.tsv"]
+        elif dt == "wes":
+            names = ["tool_accuracy_wes_v1.tsv", "tool_accuracy_wes.tsv"]
+        elif dt == "rna":
+            names = ["tool_accuracy_rna_v1.tsv", "tool_accuracy_rna.tsv"]
+        else:
+            names = [f"tool_accuracy_{dt}_v1.tsv", f"tool_accuracy_{dt}.tsv"]
+        candidates = [conf_dir / n for n in names]
+    for p in candidates:
+        if Path(p).exists():
             df = pd.read_csv(p, sep="\t")
             df = df[~df["Tool"].isin(EXCLUDE_TOOLS)].copy()
             df["Tool_label"] = df["Tool"].map(tool_label)
-            print(f"  Loaded accuracy: {p.name}  ({len(df)} tools)")
+            print(f"  Loaded accuracy: {Path(p).name}  ({len(df)} tools)")
             return df
-    raise FileNotFoundError(f"No tool_accuracy_wgs*.tsv found in {conf_dir}")
+    raise FileNotFoundError(f"No tool_accuracy_{data_type}*.tsv found in {conf_dir}")
 
-def load_weights(conf_dir):
-    for name in ("tool_weights_wgs_v2.json", "tool_weights_wgs.json"):
-        p = conf_dir / name
-        if p.exists():
+def load_weights(conf_dir, data_type="wgs", explicit_path=None):
+    if explicit_path:
+        candidates = [Path(explicit_path)]
+    else:
+        dt = data_type or "wgs"
+        if dt == "wgs":
+            names = ["tool_weights_wgs_v3.json", "tool_weights_wgs_v2.json", "tool_weights_wgs.json"]
+        elif dt == "wes":
+            names = ["tool_weights_wes_v1.json", "tool_weights_wes.json"]
+        elif dt == "rna":
+            names = ["tool_weights_rna_v1.json", "tool_weights_rna.json"]
+        else:
+            names = [f"tool_weights_{dt}_v1.json", f"tool_weights_{dt}.json"]
+        candidates = [conf_dir / n for n in names]
+    for p in candidates:
+        if Path(p).exists():
             with open(p) as f:
                 d = json.load(f)
-            print(f"  Loaded weights: {p.name}")
+            print(f"  Loaded weights: {Path(p).name}")
             return d
     return None
 
-def load_population(conf_dir):
-    p = conf_dir / "tool_accuracy_wgs_by_population.tsv"
+def load_population(conf_dir, data_type="wgs", explicit_path=None):
+    if explicit_path:
+        p = Path(explicit_path)
+    else:
+        p = conf_dir / f"tool_accuracy_{data_type}_by_population.tsv"
     if p.exists():
         df = pd.read_csv(p, sep="\t")
         df = df[~df["Tool"].isin(EXCLUDE_TOOLS)].copy()
@@ -206,7 +239,8 @@ def plot_heatmap(acc_df, out_dir, run_title):
     ax.set_xlabel("HLA Gene", fontsize=11)
     ax.set_ylabel("Tool", fontsize=11)
     n = int(acc_df["N_samples"].max())
-    title = f"HLA Typing Tool Concordance Rates — 30× WGS (N≤{n} samples)"
+    dt_label = acc_df["Data_type"].iloc[0].upper() if "Data_type" in acc_df.columns else "WGS"
+    title = f"HLA Typing Tool Concordance Rates — {dt_label} (N≤{n} samples)"
     if run_title:
         title = f"{run_title}\n{title}"
     save(fig, out_dir / "01_concordance_heatmap.png", title)
@@ -779,7 +813,7 @@ def _b64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
-def write_html(out_dir, acc_df, weights_data, run_title, plots_made, trace_records=None):
+def write_html(out_dir, acc_df, weights_data, run_title, plots_made, trace_records=None, data_type="wgs"):
     captions = {
         "01_concordance_heatmap.png":
             "Tool concordance rates across HLA genes. Color intensity indicates 2-field "
@@ -984,7 +1018,7 @@ def write_html(out_dir, acc_df, weights_data, run_title, plots_made, trace_recor
   <div>Generated: <span>{datetime.now().strftime("%Y-%m-%d %H:%M")}</span></div>
   <div>Samples: <span>≤{n_samples}</span></div>
   <div>Resolution: <span>2-field</span></div>
-  <div>Data type: <span>WGS (30×)</span></div>
+  <div>Data type: <span>{data_type.upper()}</span></div>
 </div>
 
 <h2>Concordance Summary</h2>
@@ -1017,17 +1051,25 @@ def write_html(out_dir, acc_df, weights_data, run_title, plots_made, trace_recor
 # ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--conf-dir",       required=True,
-                    help="Directory containing tool_accuracy_wgs*.tsv and tool_weights_wgs*.json")
-    ap.add_argument("--output-dir",     required=True,
+    ap.add_argument("--conf-dir",        required=True,
+                    help="Directory containing tool_accuracy_*.tsv and tool_weights_*.json")
+    ap.add_argument("--output-dir",      required=True,
                     help="Directory to write PNG plots and HTML report")
-    ap.add_argument("--strategy-file",  default=None,
+    ap.add_argument("--data-type",       choices=["wgs", "wes", "rna"], default=None,
+                    help="Analysis type (auto-detected from accuracy filename if omitted)")
+    ap.add_argument("--accuracy-file",   default=None,
+                    help="Explicit path to tool_accuracy_*.tsv (overrides --data-type lookup)")
+    ap.add_argument("--weights-file",    default=None,
+                    help="Explicit path to tool_weights_*.json (overrides --data-type lookup)")
+    ap.add_argument("--population-file", default=None,
+                    help="Explicit path to tool_accuracy_*_by_population.tsv")
+    ap.add_argument("--strategy-file",   default=None,
                     help="Path to strategy_comparison_calibrated.tsv (optional)")
-    ap.add_argument("--title",          default=None,
+    ap.add_argument("--title",           default=None,
                     help="Optional run title for plot suptitles")
-    ap.add_argument("--trace-dir",      default=None,
+    ap.add_argument("--trace-dir",       default=None,
                     help="Directory containing Nextflow trace_*.txt files for resource plots")
-    ap.add_argument("--system-ram",     type=float, default=32.0,
+    ap.add_argument("--system-ram",      type=float, default=32.0,
                     help="Available node RAM in GB for reference line in RAM plot (default: 32)")
     args = ap.parse_args()
 
@@ -1035,12 +1077,21 @@ def main():
     out_dir  = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Auto-detect data type from explicit accuracy filename if not specified
+    data_type = args.data_type
+    if data_type is None and args.accuracy_file:
+        fname = Path(args.accuracy_file).name
+        if "rna" in fname:   data_type = "rna"
+        elif "wes" in fname: data_type = "wes"
+        else:                data_type = "wgs"
+    data_type = data_type or "wgs"
+
     _set_style()
 
     print("Loading data...")
-    acc_df       = load_accuracy(conf_dir)
-    weights_data = load_weights(conf_dir)
-    pop_df       = load_population(conf_dir)
+    acc_df       = load_accuracy(conf_dir, data_type, args.accuracy_file)
+    weights_data = load_weights(conf_dir, data_type, args.weights_file)
+    pop_df       = load_population(conf_dir, data_type, args.population_file)
     strat_df     = load_strategy(args.strategy_file)
 
     run_title = args.title or ""
@@ -1091,7 +1142,7 @@ def main():
             plots_made.append("09_tool_cpu.png")
 
     print("  HTML report")
-    write_html(out_dir, acc_df, weights_data, run_title, plots_made, trace_records)
+    write_html(out_dir, acc_df, weights_data, run_title, plots_made, trace_records, data_type)
 
     print(f"\nDone. Output in: {out_dir}")
     print(f"  Open: {out_dir / 'calibration_report.html'}")
