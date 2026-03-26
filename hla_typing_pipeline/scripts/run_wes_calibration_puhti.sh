@@ -177,12 +177,15 @@ if [[ "$STATUS_ONLY" == "true" ]]; then
     echo "Master list: ${N_ALL} samples total"
     echo ""
     echo "Phase 0 — HLA BAMs downloaded:"
-    N_BAM=$(find "${BAM_DIR}" -name "*_hla.bam" 2>/dev/null | wc -l || echo 0)
+    N_BAM=$(find "${BAM_DIR}" -name "*_hla.bam" 2>/dev/null | wc -l || true)
+    N_BAM=$(echo "${N_BAM}" | tr -d '[:space:]'); N_BAM=${N_BAM:-0}
     echo "  ${N_BAM} / ${N_ALL} samples done   (${N_PENDING} pending)"
     echo ""
     echo "Phase 1 — Typing results:"
     for TOOL in $(echo "$TOOLS" | tr ',' ' '); do
-        N_RES=$(find "${BY_TOOL_DIR}/${TOOL}/" -name "*_${TOOL}.txt" 2>/dev/null | wc -l || echo 0)
+        N_RES=$(find "${BY_TOOL_DIR}/${TOOL}/" -name "*_${TOOL}.txt" 2>/dev/null | wc -l || true)
+        N_RES=$(echo "${N_RES}" | tr -d '[:space:]')
+        N_RES=${N_RES:-0}
         printf "  %-12s %3d samples\n" "$TOOL" "$N_RES"
     done
     echo ""
