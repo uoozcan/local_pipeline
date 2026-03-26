@@ -117,6 +117,45 @@ mkdir -p "${SCRATCH_BASE}" "${FASTQ_DIR}" "${RESULTS_DIR}" "${INDEX_DIR}" "${LOG
 grep -v '^#' "${SAMPLE_LIST}" | grep -v '^[[:space:]]*$' > "${ALL_SAMPLES_LIST}"
 N_ALL=$(wc -l < "${ALL_SAMPLES_LIST}")
 
+#-----------------------------------------------------------------------------
+# GT filter: only keep samples present in the Gourraud 2014 ground truth
+# Applied to master list so N_ALL/N_PENDING/N_DONE all reflect GT-only counts
+#-----------------------------------------------------------------------------
+if [[ ! -f "${GT_FILE}" ]] && [[ "$DRY_RUN" == "false" ]]; then
+    echo "[INFO] Downloading 1KGP ground truth (Gourraud 2014)..."
+    module load python-data 2>/dev/null || module load python/3.9 2>/dev/null || true
+    python3 "${INSTALL_DIR}/bin/calibrate_tool_weights.py" download-gt \
+        --output "${GT_FILE}" \
+        && echo "[OK] GT saved: ${GT_FILE}" \
+        || { echo "[ERROR] Could not download GT — aborting"; exit 1; }
+fi
+
+if [[ -f "${GT_FILE}" ]]; then
+    FILTERED_LIST="${SCRATCH_BASE}/rna_samples_gt_confirmed.txt"
+    python3 - << GTEOF
+import sys
+gt_samples = set()
+with open("${GT_FILE}") as f:
+    for line in f:
+        s = line.split('\t')[0].strip() if line.strip() else ''
+        if s and s != 'Sample':
+            gt_samples.add(s)
+kept, skipped = [], []
+with open("${ALL_SAMPLES_LIST}") as f:
+    for line in f:
+        s = line.strip()
+        if s:
+            (kept if s in gt_samples else skipped).append(s)
+with open("${FILTERED_LIST}", "w") as f:
+    f.write("\n".join(kept) + ("\n" if kept else ""))
+if skipped:
+    print(f"[WARN] {len(skipped)} sample(s) not in GT, excluded: {', '.join(skipped)}", file=sys.stderr)
+print(f"[INFO] GT-confirmed: {len(kept)} / {len(kept)+len(skipped)} samples in master list")
+GTEOF
+    ALL_SAMPLES_LIST="${FILTERED_LIST}"
+    N_ALL=$(wc -l < "${ALL_SAMPLES_LIST}")
+fi
+
 # Identify pending samples: (R1/R2 missing/empty) AND no processed sentinel
 PENDING_LIST="${SCRATCH_BASE}/rna_samples_pending.txt"
 > "${PENDING_LIST}"
@@ -141,44 +180,6 @@ fi
 
 N_TOTAL=$(wc -l < "${EFFECTIVE_LIST}")
 N_DONE=$(( N_ALL - N_PENDING ))
-
-#-----------------------------------------------------------------------------
-# GT filter: only keep samples present in the Gourraud 2014 ground truth
-#-----------------------------------------------------------------------------
-if [[ ! -f "${GT_FILE}" ]] && [[ "$DRY_RUN" == "false" ]]; then
-    echo "[INFO] Downloading 1KGP ground truth (Gourraud 2014)..."
-    module load python-data 2>/dev/null || module load python/3.9 2>/dev/null || true
-    python3 "${INSTALL_DIR}/bin/calibrate_tool_weights.py" download-gt \
-        --output "${GT_FILE}" \
-        && echo "[OK] GT saved: ${GT_FILE}" \
-        || { echo "[ERROR] Could not download GT — aborting"; exit 1; }
-fi
-
-if [[ -f "${GT_FILE}" ]]; then
-    FILTERED_LIST="${SCRATCH_BASE}/rna_samples_gt_confirmed.txt"
-    python3 - << GTEOF
-import sys
-gt_samples = set()
-with open("${GT_FILE}") as f:
-    for line in f:
-        s = line.split('\t')[0].strip() if line.strip() else ''
-        if s and s != 'Sample':
-            gt_samples.add(s)
-kept, skipped = [], []
-with open("${EFFECTIVE_LIST}") as f:
-    for line in f:
-        s = line.strip()
-        if s:
-            (kept if s in gt_samples else skipped).append(s)
-with open("${FILTERED_LIST}", "w") as f:
-    f.write("\n".join(kept) + ("\n" if kept else ""))
-if skipped:
-    print(f"[WARN] {len(skipped)} sample(s) not in GT, excluded: {', '.join(skipped)}", file=sys.stderr)
-print(f"[INFO] GT-confirmed: {len(kept)} / {len(kept)+len(skipped)} samples in this batch")
-GTEOF
-    EFFECTIVE_LIST="${FILTERED_LIST}"
-    N_TOTAL=$(wc -l < "${EFFECTIVE_LIST}")
-fi
 
 #-----------------------------------------------------------------------------
 # --status: show progress and exit

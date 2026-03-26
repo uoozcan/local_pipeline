@@ -115,29 +115,9 @@ mkdir -p "${SCRATCH_BASE}" "${BAM_DIR}" "${RESULTS_DIR}" "${INDEX_DIR}" "${LOGS_
 grep -v '^#' "${SAMPLE_LIST}" | grep -v '^[[:space:]]*$' > "${ALL_SAMPLES_LIST}"
 N_ALL=$(wc -l < "${ALL_SAMPLES_LIST}")
 
-# Identify pending samples: no HLA BAM AND no processed sentinel
-PENDING_LIST="${SCRATCH_BASE}/wes_samples_pending.txt"
-> "${PENDING_LIST}"
-while IFS= read -r S; do
-    if [[ ! -f "${BAM_DIR}/${S}_hla.bam" ]] && [[ ! -f "${PROCESSED_DIR}/${S}.done" ]]; then
-        echo "$S" >> "${PENDING_LIST}"
-    fi
-done < "${ALL_SAMPLES_LIST}"
-N_PENDING=$(wc -l < "${PENDING_LIST}")
-
-# Apply batch size
-if [[ "${BATCH_SIZE}" -gt 0 && "${N_PENDING}" -gt "${BATCH_SIZE}" ]]; then
-    head -n "${BATCH_SIZE}" "${PENDING_LIST}" > "${EFFECTIVE_LIST}"
-else
-    cp "${PENDING_LIST}" "${EFFECTIVE_LIST}"
-fi
-
-N_TOTAL=$(wc -l < "${EFFECTIVE_LIST}")
-N_DONE=$(( N_ALL - N_PENDING ))
-
 #-----------------------------------------------------------------------------
 # GT filter: only keep samples present in the Gourraud 2014 ground truth
-# Downloads GT if not present (needed for calibration anyway).
+# Applied to master list so N_ALL/N_PENDING/N_DONE all reflect GT-only counts
 #-----------------------------------------------------------------------------
 if [[ ! -f "${GT_FILE}" ]] && [[ "$DRY_RUN" == "false" ]]; then
     echo "[INFO] Downloading 1KGP ground truth (Gourraud 2014)..."
@@ -159,7 +139,7 @@ with open("${GT_FILE}") as f:
         if s and s != 'Sample':
             gt_samples.add(s)
 kept, skipped = [], []
-with open("${EFFECTIVE_LIST}") as f:
+with open("${ALL_SAMPLES_LIST}") as f:
     for line in f:
         s = line.strip()
         if s:
@@ -168,11 +148,31 @@ with open("${FILTERED_LIST}", "w") as f:
     f.write("\n".join(kept) + ("\n" if kept else ""))
 if skipped:
     print(f"[WARN] {len(skipped)} sample(s) not in GT, excluded: {', '.join(skipped)}", file=sys.stderr)
-print(f"[INFO] GT-confirmed: {len(kept)} / {len(kept)+len(skipped)} samples in this batch")
+print(f"[INFO] GT-confirmed: {len(kept)} / {len(kept)+len(skipped)} samples in master list")
 GTEOF
-    EFFECTIVE_LIST="${FILTERED_LIST}"
-    N_TOTAL=$(wc -l < "${EFFECTIVE_LIST}")
+    ALL_SAMPLES_LIST="${FILTERED_LIST}"
+    N_ALL=$(wc -l < "${ALL_SAMPLES_LIST}")
 fi
+
+# Identify pending samples: no HLA BAM AND no processed sentinel
+PENDING_LIST="${SCRATCH_BASE}/wes_samples_pending.txt"
+> "${PENDING_LIST}"
+while IFS= read -r S; do
+    if [[ ! -f "${BAM_DIR}/${S}_hla.bam" ]] && [[ ! -f "${PROCESSED_DIR}/${S}.done" ]]; then
+        echo "$S" >> "${PENDING_LIST}"
+    fi
+done < "${ALL_SAMPLES_LIST}"
+N_PENDING=$(wc -l < "${PENDING_LIST}")
+
+# Apply batch size
+if [[ "${BATCH_SIZE}" -gt 0 && "${N_PENDING}" -gt "${BATCH_SIZE}" ]]; then
+    head -n "${BATCH_SIZE}" "${PENDING_LIST}" > "${EFFECTIVE_LIST}"
+else
+    cp "${PENDING_LIST}" "${EFFECTIVE_LIST}"
+fi
+
+N_TOTAL=$(wc -l < "${EFFECTIVE_LIST}")
+N_DONE=$(( N_ALL - N_PENDING ))
 
 #-----------------------------------------------------------------------------
 # --status: show progress and exit
