@@ -45,7 +45,7 @@ INSTALL_DIR="$(dirname "$SCRIPT_DIR")"   # hla_typing_pipeline/
 PROJECT_ID="${SLURM_JOB_ACCOUNT:-project_2008084}"
 # hlala excluded: needs full-genome PRG graph (not HLA-region BAM)
 # seq2hla excluded: RNA-seq optimised, unreliable on WGS
-TOOLS="hlahd,spechla,arcashla,optitype,xhla,kourami,polysolver"
+TOOLS="hlahd,spechla,arcashla,optitype,kourami,polysolver"
 GENES="A,B,C,DRB1,DQB1"
 RESOLUTION="2-field"
 SAMPLE_LIST_DEFAULT="${INSTALL_DIR}/conf/wgs_samples_50.txt"
@@ -749,11 +749,17 @@ SBATCH_CAL="sbatch --parsable \
     --dependency=afterok:${COLLECT_JOB} \
     ${CALIBRATE_SCRIPT}"
 
-if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[DRY-RUN] ${SBATCH_CAL}"
+REMAINING=$(( N_PENDING - N_TOTAL ))
+if [[ "$CALIBRATE_ONLY" == "true" ]] || [[ "$REMAINING" -eq 0 ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "[DRY-RUN] ${SBATCH_CAL}"
+    else
+        CALIBRATE_JOB=$(eval "$SBATCH_CAL")
+        echo "[INFO] Phase 2 calibration job submitted: ${CALIBRATE_JOB}"
+    fi
 else
-    CALIBRATE_JOB=$(eval "$SBATCH_CAL")
-    echo "[INFO] Phase 2 calibration job submitted: ${CALIBRATE_JOB}"
+    echo "[INFO] ${REMAINING} sample(s) still pending — skipping Phase 2 calibration."
+    echo "[INFO] Re-run script for next batch. Use --calibrate-only when all batches complete."
 fi
 
 echo ""
