@@ -1,0 +1,69 @@
+# 50 Geuvadis ERP001942 samples for RNA-seq HLA calibration
+# Balanced across 5 populations (10 each)
+# All confirmed in Gourraud 2014 GT AND present in Geuvadis ERP001942 RNA-seq
+# FASTQs at ENA: ftp.sra.ebi.ac.uk/vol1/fastq/ERR{xxx}/{ERR}{_1,_2}.fastq.gz
+#
+# NOTE: Verify/update with on-Puhti intersection before first run:
+#   python3 scripts/gen_rna_sample_list.py  (if available)
+#   OR: the run script auto-filters against GT and ENA metadata at runtime
+#
+# AFR/YRI (Gourraud 2014 confirmed, present in Geuvadis ERP001942)
+NA18498
+NA18499
+NA18501
+NA18502
+NA18504
+NA18505
+NA18507
+NA18508
+NA18510
+NA18511
+#
+# EUR/CEU (Gourraud 2014 confirmed, present in Geuvadis ERP001942)
+NA06985
+NA06986
+NA06994
+NA07000
+NA10847
+NA10851
+NA11830
+NA11840
+NA11920
+NA12004
+#
+# EUR/FIN (Gourraud 2014 confirmed, present in Geuvadis ERP001942)
+HG00171
+HG00173
+HG00174
+HG00176
+HG00177
+HG00178
+HG00179
+HG00180
+HG00181
+HG00182
+#
+# EUR/GBR (Gourraud 2014 confirmed, present in Geuvadis ERP001942)
+HG00096
+HG00097
+HG00099
+HG00100
+HG00102
+HG00103
+HG00105
+HG00106
+HG00107
+HG00108
+#
+# EUR/TSI (Gourraud 2014 confirmed, present in Geuvadis ERP001942)
+NA20502
+NA20503
+NA20504
+NA20505
+NA20506
+NA20507
+NA20508
+NA20509
+NA20510
+NA20511
+#

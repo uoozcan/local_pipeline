@@ -1,36 +1,36 @@
 #!/bin/bash
 # =============================================================================
-# run_wes_calibration_puhti.sh
-# WES HLA calibration on CSC Puhti — 1000 Genomes Phase 3 exome BAMs
+# run_rna_calibration_puhti.sh
+# RNA-seq HLA calibration on CSC Puhti — Geuvadis ERP001942 paired FASTQs
 #
-# Uses 1KGP Phase 3 WES BAMs (hg19/GRCh37) from EBI FTP.
-# Ground truth: Gourraud et al. 2014 (same as WGS calibration).
-# Produces: conf/tool_weights_wes_v1.json, conf/tool_accuracy_wes_v1.tsv
+# Uses Geuvadis ERP001942 RNA-seq FASTQs (LCL cell lines, 1KGP Phase 1 samples).
+# Ground truth: Gourraud et al. 2014 (same as WGS/WES calibration).
+# Produces: conf/tool_weights_rna_v1.json, conf/tool_accuracy_rna_v1.tsv
 #
 # Usage:
-#   bash scripts/run_wes_calibration_puhti.sh [OPTIONS]
+#   bash scripts/run_rna_calibration_puhti.sh [OPTIONS]
 #
 # Options:
 #   --project PROJECT_ID   CSC project account (default: $SLURM_JOB_ACCOUNT or project_2008084)
-#   --sample-list FILE     Sample list (default: conf/wes_samples_50.txt)
-#   --batch-size N         Process next N unextracted samples per run (default: 10)
-#   --tools TOOLS          Comma-separated tools (default: hlahd,spechla,arcashla,optitype)
+#   --sample-list FILE     Sample list (default: conf/rna_samples_50.txt)
+#   --batch-size N         Process next N undownloaded samples per run (default: 10)
+#   --tools TOOLS          Comma-separated tools (default: spechla,hlahd,arcashla,optitype,t1k,seq2hla,xhla)
 #   --genes GENES          Comma-separated genes (default: A,B,C,DRB1,DQB1)
-#   --skip-extract         Skip Phase 0 (FASTQs already present)
+#   --skip-download        Skip Phase 0 (FASTQs already present)
 #   --skip-typing          Skip Phase 1 (results already present)
 #   --calibrate-only       Skip to Phase 2 (calibrate from existing results)
-#   --keep-inputs          Do NOT delete HLA BAMs after Phase 1b (default: delete to save space)
+#   --keep-inputs          Do NOT delete FASTQs after Phase 1b (default: delete to save space)
 #   --status               Show current progress and exit
 #   --dry-run              Print commands without submitting
 #   -h, --help             Show this help
 #
-# Batching: each run extracts and types the next --batch-size samples without FASTQs.
+# Batching: each run downloads and types the next --batch-size samples without FASTQs.
 # Re-run after each batch completes. Calibration accumulates all results.
 # Example (5 runs of 10):
-#   bash scripts/run_wes_calibration_puhti.sh --project project_2008084 --batch-size 10
+#   bash scripts/run_rna_calibration_puhti.sh --project project_2008084 --batch-size 10
 #
-# Phase 0: SLURM array — stream HLA region from EBI WES BAM → paired FASTQs
-# Phase 1: SLURM job  — run Nextflow typing batch (seq_type=wes)
+# Phase 0: SLURM array — download paired FASTQs from ENA FTP (ERP001942)
+# Phase 1: SLURM job  — run Nextflow typing batch (seq_type=rna)
 # Phase 1b: SLURM job — collect results into by_tool/ layout
 # Phase 2: SLURM job  — calibrate weights + compare voting strategies
 # =============================================================================
@@ -43,41 +43,41 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(dirname "$SCRIPT_DIR")"   # hla_typing_pipeline/
 
 PROJECT_ID="${SLURM_JOB_ACCOUNT:-project_2008084}"
-TOOLS="hlahd,spechla,arcashla,optitype,seq2hla,kourami,polysolver"
+TOOLS="spechla,hlahd,arcashla,optitype,t1k,seq2hla,xhla"
 GENES="A,B,C,DRB1,DQB1"
 RESOLUTION="2-field"
-SAMPLE_LIST_DEFAULT="${INSTALL_DIR}/conf/wes_samples_50.txt"
+SAMPLE_LIST_DEFAULT="${INSTALL_DIR}/conf/rna_samples_50.txt"
 SAMPLE_LIST=""
 BATCH_SIZE=10   # samples per run; 0 = all
-SKIP_EXTRACT=false
+SKIP_DOWNLOAD=false
 SKIP_TYPING=false
 CALIBRATE_ONLY=false
 STATUS_ONLY=false
 DRY_RUN=false
-KEEP_INPUTS=false   # set true to retain HLA BAMs after Phase 1b
+KEEP_INPUTS=false   # set true to retain downloaded FASTQs after Phase 1b
 
-# EBI FTP paths
-EBI_EXOME_INDEX="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/20130502.phase3.exome.sequence.index"
-HLA_REGION="6:28000000-34000000"   # hg19/GRCh37 ENSEMBL (no chr prefix)
+# ENA project for Geuvadis RNA-seq
+ENA_PROJECT="ERP001942"
+ENA_META_URL="https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${ENA_PROJECT}&result=read_run&fields=sample_accession,run_accession,fastq_ftp&format=tsv"
 
 #-----------------------------------------------------------------------------
 # Argument parsing
 #-----------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --project)   PROJECT_ID="$2";       shift 2 ;;
-        --sample-list) SAMPLE_LIST="$2";    shift 2 ;;
-        --batch-size)  BATCH_SIZE="$2";     shift 2 ;;
-        --tools)     TOOLS="$2";            shift 2 ;;
-        --genes)     GENES="$2";            shift 2 ;;
-        --skip-extract)   SKIP_EXTRACT=true;   shift ;;
+        --project)     PROJECT_ID="$2";       shift 2 ;;
+        --sample-list) SAMPLE_LIST="$2";      shift 2 ;;
+        --batch-size)  BATCH_SIZE="$2";       shift 2 ;;
+        --tools)       TOOLS="$2";            shift 2 ;;
+        --genes)       GENES="$2";            shift 2 ;;
+        --skip-download)  SKIP_DOWNLOAD=true; shift ;;
         --skip-typing)    SKIP_TYPING=true;   shift ;;
-        --calibrate-only) CALIBRATE_ONLY=true; SKIP_EXTRACT=true; SKIP_TYPING=true; shift ;;
+        --calibrate-only) CALIBRATE_ONLY=true; SKIP_DOWNLOAD=true; SKIP_TYPING=true; shift ;;
         --keep-inputs)    KEEP_INPUTS=true;   shift ;;
-        --status)    STATUS_ONLY=true;      shift ;;
-        --dry-run)   DRY_RUN=true;          shift ;;
+        --status)      STATUS_ONLY=true;      shift ;;
+        --dry-run)     DRY_RUN=true;          shift ;;
         -h|--help)
-            sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+            sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
             exit 0 ;;
         *) echo "[ERROR] Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -88,17 +88,19 @@ done
 #-----------------------------------------------------------------------------
 # Derived paths
 #-----------------------------------------------------------------------------
-SCRATCH_BASE="/scratch/${PROJECT_ID}/hla_calibration/wes"
-BAM_DIR="${SCRATCH_BASE}/bams"
+SCRATCH_BASE="/scratch/${PROJECT_ID}/hla_calibration/rna"
+FASTQ_DIR="${SCRATCH_BASE}/fastqs"
 RESULTS_DIR="${SCRATCH_BASE}/results"
 BY_TOOL_DIR="${RESULTS_DIR}/by_tool"
 INDEX_DIR="${SCRATCH_BASE}/index"
 LOGS_DIR="${SCRATCH_BASE}/logs"
-PROCESSED_DIR="${SCRATCH_BASE}/processed"   # sentinel files: ${SAMPLE}.done after cleanup
 GT_FILE="/scratch/${PROJECT_ID}/hla_tools/hla_typing_pipeline/conf/1kgp_hla_gt.tsv"
 POP_FILE="/scratch/${PROJECT_ID}/hla_tools/hla_typing_pipeline/conf/1kgp_populations.tsv"
-WEIGHTS_OUT="${INSTALL_DIR}/conf/tool_weights_wes_v1.json"
-TABLE_OUT="${INSTALL_DIR}/conf/tool_accuracy_wes_v1.tsv"
+WEIGHTS_OUT="${INSTALL_DIR}/conf/tool_weights_rna_v1.json"
+TABLE_OUT="${INSTALL_DIR}/conf/tool_accuracy_rna_v1.tsv"
+ENA_META="${INDEX_DIR}/geuvadis_run_table.tsv"
+URL_MAP="${INDEX_DIR}/sample_fastq_urls.tsv"
+PROCESSED_DIR="${SCRATCH_BASE}/processed"   # sentinel files: ${SAMPLE}.done after cleanup
 
 #-----------------------------------------------------------------------------
 # Build effective sample list for this batch
@@ -106,20 +108,25 @@ TABLE_OUT="${INSTALL_DIR}/conf/tool_accuracy_wes_v1.tsv"
 # - Filter to samples whose FASTQs do NOT yet exist (--batch-size 0 = all pending)
 # - Take first BATCH_SIZE of those
 #-----------------------------------------------------------------------------
-EFFECTIVE_LIST="${SCRATCH_BASE}/wes_samples_effective.txt"
-ALL_SAMPLES_LIST="${SCRATCH_BASE}/wes_samples_all.txt"
+EFFECTIVE_LIST="${SCRATCH_BASE}/rna_samples_effective.txt"
+ALL_SAMPLES_LIST="${SCRATCH_BASE}/rna_samples_all.txt"
 
-mkdir -p "${SCRATCH_BASE}" "${BAM_DIR}" "${RESULTS_DIR}" "${INDEX_DIR}" "${LOGS_DIR}" "${PROCESSED_DIR}"
+mkdir -p "${SCRATCH_BASE}" "${FASTQ_DIR}" "${RESULTS_DIR}" "${INDEX_DIR}" "${LOGS_DIR}" "${PROCESSED_DIR}"
 
 # All samples (comments/blanks stripped)
 grep -v '^#' "${SAMPLE_LIST}" | grep -v '^[[:space:]]*$' > "${ALL_SAMPLES_LIST}"
 N_ALL=$(wc -l < "${ALL_SAMPLES_LIST}")
 
-# Identify pending samples: no HLA BAM AND no processed sentinel
-PENDING_LIST="${SCRATCH_BASE}/wes_samples_pending.txt"
+# Identify pending samples: (R1/R2 missing/empty) AND no processed sentinel
+PENDING_LIST="${SCRATCH_BASE}/rna_samples_pending.txt"
 > "${PENDING_LIST}"
 while IFS= read -r S; do
-    if [[ ! -f "${BAM_DIR}/${S}_hla.bam" ]] && [[ ! -f "${PROCESSED_DIR}/${S}.done" ]]; then
+    R1="${FASTQ_DIR}/${S}_R1.fastq.gz"
+    R2="${FASTQ_DIR}/${S}_R2.fastq.gz"
+    FASTQS_MISSING=false
+    { [[ ! -f "${R1}" ]] || [[ ! -s "${R1}" ]] || [[ ! -f "${R2}" ]] || [[ ! -s "${R2}" ]]; } \
+        && FASTQS_MISSING=true
+    if [[ "${FASTQS_MISSING}" == "true" ]] && [[ ! -f "${PROCESSED_DIR}/${S}.done" ]]; then
         echo "$S" >> "${PENDING_LIST}"
     fi
 done < "${ALL_SAMPLES_LIST}"
@@ -137,7 +144,6 @@ N_DONE=$(( N_ALL - N_PENDING ))
 
 #-----------------------------------------------------------------------------
 # GT filter: only keep samples present in the Gourraud 2014 ground truth
-# Downloads GT if not present (needed for calibration anyway).
 #-----------------------------------------------------------------------------
 if [[ ! -f "${GT_FILE}" ]] && [[ "$DRY_RUN" == "false" ]]; then
     echo "[INFO] Downloading 1KGP ground truth (Gourraud 2014)..."
@@ -149,7 +155,7 @@ if [[ ! -f "${GT_FILE}" ]] && [[ "$DRY_RUN" == "false" ]]; then
 fi
 
 if [[ -f "${GT_FILE}" ]]; then
-    FILTERED_LIST="${SCRATCH_BASE}/wes_samples_gt_confirmed.txt"
+    FILTERED_LIST="${SCRATCH_BASE}/rna_samples_gt_confirmed.txt"
     python3 - << GTEOF
 import sys
 gt_samples = set()
@@ -178,18 +184,17 @@ fi
 # --status: show progress and exit
 #-----------------------------------------------------------------------------
 if [[ "$STATUS_ONLY" == "true" ]]; then
-    echo "=== WES Calibration Status ==="
+    echo "=== RNA-seq Calibration Status ==="
     echo "Project:     ${PROJECT_ID}"
     echo "Master list: ${N_ALL} samples total"
     echo ""
-    echo "Phase 0 — HLA BAMs / processing:"
-    N_DONE=$(( N_ALL - N_PENDING ))
+    echo "Phase 0 — FASTQs downloaded / processed:"
     N_PROCESSED=$(find "${PROCESSED_DIR}" -maxdepth 1 -name "*.done" 2>/dev/null | wc -l || true)
     N_PROCESSED=$(echo "${N_PROCESSED}" | tr -d '[:space:]'); N_PROCESSED=${N_PROCESSED:-0}
-    N_BAM_PRESENT=$(find "${BAM_DIR}" -maxdepth 1 -name "*_hla.bam" 2>/dev/null | wc -l || true)
-    N_BAM_PRESENT=$(echo "${N_BAM_PRESENT}" | tr -d '[:space:]'); N_BAM_PRESENT=${N_BAM_PRESENT:-0}
+    N_FASTQ_PRESENT=$(find "${FASTQ_DIR}" -maxdepth 1 -name "*_R1.fastq.gz" 2>/dev/null | wc -l || true)
+    N_FASTQ_PRESENT=$(echo "${N_FASTQ_PRESENT}" | tr -d '[:space:]'); N_FASTQ_PRESENT=${N_FASTQ_PRESENT:-0}
     echo "  ${N_DONE} / ${N_ALL} samples ready  (${N_PENDING} pending)"
-    echo "  ${N_BAM_PRESENT} HLA BAMs on disk   ${N_PROCESSED} cleaned (sentinel)"
+    echo "  ${N_FASTQ_PRESENT} FASTQ pairs on disk   ${N_PROCESSED} cleaned (sentinel)"
     echo ""
     echo "Phase 1 — Typing results:"
     for TOOL in $(echo "$TOOLS" | tr ',' ' '); do
@@ -204,228 +209,238 @@ if [[ "$STATUS_ONLY" == "true" ]]; then
     exit 0
 fi
 
-# Nothing to extract?
-if [[ "$SKIP_EXTRACT" == "false" && "$CALIBRATE_ONLY" == "false" && "${N_TOTAL}" -eq 0 ]]; then
-    echo "[INFO] All ${N_ALL} samples already processed (BAMs present or cleaned). Use --calibrate-only to run calibration."
+# Nothing to download?
+if [[ "$SKIP_DOWNLOAD" == "false" && "$CALIBRATE_ONLY" == "false" && "${N_TOTAL}" -eq 0 ]]; then
+    echo "[INFO] All ${N_ALL} samples already processed (FASTQs present or cleaned). Use --calibrate-only to run calibration."
     exit 0
 fi
 
 echo "==================================================================="
-echo " WES HLA Calibration — CSC Puhti"
+echo " RNA-seq HLA Calibration — CSC Puhti"
 echo "==================================================================="
 echo " Project:      ${PROJECT_ID}"
 echo " Samples:      ${N_TOTAL} this batch  (${N_DONE}/${N_ALL} total done; ${N_PENDING} pending)"
 echo " Tools:        ${TOOLS}"
 echo " Genes:        ${GENES}"
-echo " BAMs:         ${BAM_DIR}"
+echo " FASTQs:       ${FASTQ_DIR}"
 echo " Results:      ${RESULTS_DIR}"
 echo " Weights out:  ${WEIGHTS_OUT}"
-echo " Keep inputs:  ${KEEP_INPUTS}  (false = delete BAMs after Phase 1b)"
+echo " Keep inputs:  ${KEEP_INPUTS}  (false = delete FASTQs after Phase 1b)"
 echo " Dry-run:      ${DRY_RUN}"
 echo "==================================================================="
 echo ""
 
 #-----------------------------------------------------------------------------
-# Build per-sample BAM URL map: SAMPLE -> full BAM FTP URL
+# Download Geuvadis ENA run table and build FASTQ URL map
 #
-# Root cause of earlier failure: 20130502.phase3.exome.sequence.index lists
-# raw FASTQ files, not BAM alignments. BAM URLs must be constructed from the
-# 1KGP population panel which maps sample_id -> population code (e.g. YRI).
-#
-# BAM URL pattern:
-#   ftp://.../phase3/data/{SAMPLE}/exome_alignment/
-#     {SAMPLE}.mapped.ILLUMINA.bwa.{POP}.exome.{DATE}.bam
-# Dates tried in order: 20121211, 20130415, 20120522
+# ENA metadata maps sample_accession (NA/HG ID) → ERR accession → fastq_ftp
+# fastq_ftp field: semicolon-separated FTP paths, e.g.:
+#   ftp.sra.ebi.ac.uk/vol1/fastq/ERR188/ERR188022/ERR188022_1.fastq.gz;...
+# Samples with multiple runs are concatenated by wget (each downloaded separately
+# then combined, or just take the first run per sample for simplicity).
 #-----------------------------------------------------------------------------
-PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20130502.ALL.panel"
-PANEL_FILE="${INDEX_DIR}/1kgp_panel.tsv"
-URL_MAP="${INDEX_DIR}/sample_bam_urls.tsv"
-
-# Download population panel (cached)
-if [[ ! -f "$PANEL_FILE" ]]; then
-    echo "[INFO] Downloading 1KGP population panel..."
-    if [[ "$DRY_RUN" == "false" ]]; then
-        wget -q -O "${PANEL_FILE}" "${PANEL_URL}" \
-            || curl -s -o "${PANEL_FILE}" "${PANEL_URL}" \
-            || { echo "[ERROR] Could not download population panel from EBI"; exit 1; }
-        echo "[OK] Panel saved: ${PANEL_FILE} ($(wc -l < "$PANEL_FILE") entries)"
-    else
-        echo "[DRY-RUN] wget -q -O ${PANEL_FILE} ${PANEL_URL}"
-    fi
+if [[ ! -f "${ENA_META}" ]] && [[ "$DRY_RUN" == "false" ]]; then
+    echo "[INFO] Downloading Geuvadis ENA run table..."
+    curl -s "${ENA_META_URL}" > "${ENA_META}" \
+        || wget -q -O "${ENA_META}" "${ENA_META_URL}" \
+        || { echo "[ERROR] Could not download ENA run table"; exit 1; }
+    echo "[OK] ENA metadata: ${ENA_META} ($(wc -l < "${ENA_META}") entries)"
 else
-    echo "[INFO] Using cached population panel: ${PANEL_FILE}"
-fi
-
-# (Re)build URL map whenever the panel changes or map is missing
-# Delete stale map built from the wrong (FASTQ) index
-if [[ -f "$URL_MAP" ]]; then
-    N_MAPPED=$(wc -l < "$URL_MAP")
-    if [[ "$N_MAPPED" -eq 0 ]]; then
-        echo "[INFO] Stale empty URL map found — rebuilding from population panel"
-        rm -f "$URL_MAP"
-    fi
+    [[ "$DRY_RUN" == "false" ]] && echo "[INFO] Using cached ENA metadata: ${ENA_META}"
 fi
 
 if [[ "$DRY_RUN" == "false" ]]; then
-    echo "[INFO] Building sample→BAM URL map from population panel..."
+    echo "[INFO] Building sample→FASTQ URL map from ENA metadata..."
     python3 - << PYEOF
 import sys, os
 
-panel_file  = "${PANEL_FILE}"
+meta_file   = "${ENA_META}"
 sample_list = "${ALL_SAMPLES_LIST}"
 url_map_out = "${URL_MAP}"
-ftp_base    = "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data"
-# Dates to try in order (most samples use 20121211)
-DATES = ["20121211", "20130415", "20120522"]
-
-# Load population panel: sample_id \t pop \t super_pop \t gender
-pop_map = {}
-with open(panel_file) as fh:
-    for line in fh:
-        line = line.strip()
-        if not line or line.startswith("sample"):
-            continue
-        parts = line.split()
-        if len(parts) >= 2:
-            pop_map[parts[0]] = parts[1]   # sample_id -> pop (e.g. YRI)
 
 # Load sample list
 with open(sample_list) as fh:
-    samples = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
+    samples = set(l.strip() for l in fh if l.strip() and not l.startswith("#"))
 
-found, missing = 0, []
+# Parse ENA metadata TSV: sample_accession, run_accession, fastq_ftp
+# fastq_ftp: semicolon-separated paths (e.g. R1;R2 or R1;R2;unpaired)
+# Use first run per sample (some samples have multiple runs; first is largest)
+sample_runs = {}   # sample_id -> [(r1_url, r2_url), ...]
+with open(meta_file) as fh:
+    header = None
+    for line in fh:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        parts = line.split("\t")
+        if header is None:
+            header = parts
+            # Find column indices
+            try:
+                i_sample = header.index("sample_accession")
+                i_run    = header.index("run_accession")
+                i_ftp    = header.index("fastq_ftp")
+            except ValueError:
+                print(f"[ERROR] Unexpected ENA header: {header}", file=sys.stderr)
+                sys.exit(1)
+            continue
+        if len(parts) <= max(i_sample, i_run, i_ftp):
+            continue
+        sample_id = parts[i_sample].strip()
+        if sample_id not in samples:
+            continue
+        ftp_paths = [p.strip() for p in parts[i_ftp].split(";") if p.strip()]
+        # Expect paired FASTQs: _1.fastq.gz and _2.fastq.gz
+        r1 = next((p for p in ftp_paths if "_1.fastq.gz" in p), None)
+        r2 = next((p for p in ftp_paths if "_2.fastq.gz" in p), None)
+        if r1 and r2:
+            if sample_id not in sample_runs:
+                sample_runs[sample_id] = []
+            sample_runs[sample_id].append((r1, r2))
+
+found, missing, multi = 0, [], []
 with open(url_map_out, "w") as fout:
-    for sample in samples:
-        pop = pop_map.get(sample)
-        if not pop:
+    for sample in sorted(samples):
+        runs = sample_runs.get(sample)
+        if not runs:
             missing.append(sample)
             continue
-        # Use the first date as primary URL; the extraction script tries all dates
-        url = f"{ftp_base}/{sample}/exome_alignment/{sample}.mapped.ILLUMINA.bwa.{pop}.exome.{DATES[0]}.bam"
-        # Also write alt-date URLs as fallbacks (tab-separated after main URL)
-        alts = [f"{ftp_base}/{sample}/exome_alignment/{sample}.mapped.ILLUMINA.bwa.{pop}.exome.{d}.bam"
-                for d in DATES[1:]]
-        fout.write(f"{sample}\t{url}\t{'|'.join(alts)}\n")
+        if len(runs) > 1:
+            multi.append(f"{sample}({len(runs)} runs)")
+        # Write all runs as pipe-separated alternates after first run
+        r1_primary, r2_primary = runs[0]
+        r1_alts = "|".join(r for r, _ in runs[1:]) if len(runs) > 1 else ""
+        r2_alts = "|".join(r for _, r in runs[1:]) if len(runs) > 1 else ""
+        fout.write(f"{sample}\t{r1_primary}\t{r2_primary}\t{r1_alts}\t{r2_alts}\n")
         found += 1
 
-print(f"[OK] URL map: {found} samples mapped, {len(missing)} missing from panel")
+print(f"[OK] URL map: {found} samples mapped, {len(missing)} missing from ENA metadata")
 if missing:
-    print(f"[WARN] Not in panel: {', '.join(missing)}", file=sys.stderr)
+    print(f"[WARN] Not in ENA metadata: {', '.join(missing)}", file=sys.stderr)
+if multi:
+    print(f"[INFO] Multiple runs (first used): {', '.join(multi)}")
 PYEOF
 fi
 
 #-----------------------------------------------------------------------------
-# Phase 0: SLURM array — extract HLA FASTQs from WES BAMs
+# Phase 0: SLURM array — download paired FASTQs from ENA FTP
 #-----------------------------------------------------------------------------
 PHASE0_DEP=""
 
-if [[ "$SKIP_EXTRACT" == "false" ]]; then
-    echo "=== Phase 0: Submitting FASTQ extraction array (${N_TOTAL} tasks) ==="
+if [[ "$SKIP_DOWNLOAD" == "false" ]]; then
+    echo "=== Phase 0: Submitting FASTQ download array (${N_TOTAL} tasks) ==="
 
-    EXTRACT_SCRIPT="${SCRATCH_BASE}/phase0_extract.sh"
-    cat > "$EXTRACT_SCRIPT" << 'EXTRACTEOF'
+    DOWNLOAD_SCRIPT="${SCRATCH_BASE}/phase0_download.sh"
+    cat > "$DOWNLOAD_SCRIPT" << 'DLEOF'
 #!/bin/bash
-#SBATCH --job-name=wes_extract
+#SBATCH --job-name=rna_download
 #SBATCH --partition=small
-#SBATCH --time=02:00:00
-#SBATCH --mem=8G
-#SBATCH --cpus-per-task=4
-#SBATCH --output=LOGS_PLACEHOLDER/extract_%A_%a.out
-#SBATCH --error=LOGS_PLACEHOLDER/extract_%A_%a.err
+#SBATCH --time=04:00:00
+#SBATCH --mem=4G
+#SBATCH --cpus-per-task=2
+#SBATCH --output=LOGS_PLACEHOLDER/download_%A_%a.out
+#SBATCH --error=LOGS_PLACEHOLDER/download_%A_%a.err
 
 set -euo pipefail
-module purge
-module load samtools 2>/dev/null || true
 
 SAMPLE=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "EFFECTIVE_LIST_PLACEHOLDER")
 [[ -z "$SAMPLE" ]] && { echo "[ERROR] Empty sample for task ${SLURM_ARRAY_TASK_ID}"; exit 1; }
 
-BAM_DIR="BAM_DIR_PLACEHOLDER"
+FASTQ_DIR="FASTQ_DIR_PLACEHOLDER"
 URL_MAP="URL_MAP_PLACEHOLDER"
-HLA_REGION="HLA_REGION_PLACEHOLDER"
 
-BAM_OUT="${BAM_DIR}/${SAMPLE}_hla.bam"
+R1_OUT="${FASTQ_DIR}/${SAMPLE}_R1.fastq.gz"
+R2_OUT="${FASTQ_DIR}/${SAMPLE}_R2.fastq.gz"
 
 echo "[INFO] Sample: ${SAMPLE}"
 echo "[INFO] Task:   ${SLURM_ARRAY_TASK_ID}"
 echo "[INFO] Date:   $(date)"
 
-# Skip if already done (BAM + index both present)
-if [[ -f "${BAM_OUT}" ]] && [[ -f "${BAM_OUT}.bai" ]]; then
-    echo "[SKIP] HLA BAM already present for ${SAMPLE}"
+# Skip if both FASTQs already present and non-empty
+if [[ -f "${R1_OUT}" ]] && [[ -s "${R1_OUT}" ]] && [[ -f "${R2_OUT}" ]] && [[ -s "${R2_OUT}" ]]; then
+    echo "[SKIP] FASTQs already present for ${SAMPLE}"
     exit 0
 fi
 
-# Look up BAM URL (col 2 = primary; col 3 = pipe-separated alt-date fallbacks)
+# Look up FASTQ URLs (col 2 = R1 primary, col 3 = R2 primary, col 4 = R1 alts, col 5 = R2 alts)
 LINE=$(grep -P "^${SAMPLE}\t" "$URL_MAP" || true)
 if [[ -z "$LINE" ]]; then
-    echo "[ERROR] No BAM URL found for sample ${SAMPLE} in URL map" >&2
+    echo "[ERROR] No FASTQ URL found for sample ${SAMPLE} in URL map" >&2
     exit 1
 fi
-PRIMARY_URL=$(echo "$LINE" | cut -f2)
-ALT_URLS=$(echo "$LINE" | cut -f3 | tr '|' ' ')
+R1_URL=$(echo "$LINE" | cut -f2)
+R2_URL=$(echo "$LINE" | cut -f3)
+R1_ALTS=$(echo "$LINE" | cut -f4 | tr '|' ' ')
+R2_ALTS=$(echo "$LINE" | cut -f5 | tr '|' ' ')
 
-# Try primary URL, then alt-date fallbacks — stream HLA region directly as BAM
-mkdir -p "${BAM_DIR}"
-TMP_BAM="${BAM_DIR}/${SAMPLE}_hla_tmp.bam"
-BAM_URL=""
-for URL in ${PRIMARY_URL} ${ALT_URLS}; do
-    echo "[INFO] Trying: ${URL}"
-    if samtools view -b -h -o "${TMP_BAM}" "${URL}" "${HLA_REGION}" 2>/dev/null; then
-        NREADS=$(samtools view -c "${TMP_BAM}" 2>/dev/null || echo 0)
-        if [[ "${NREADS}" -gt 0 ]]; then
-            BAM_URL="${URL}"
-            echo "[OK] HLA reads: ${NREADS} from ${URL}"
-            break
-        else
-            echo "[WARN] 0 reads from ${URL} — trying next"
-            rm -f "${TMP_BAM}"
-        fi
+mkdir -p "${FASTQ_DIR}"
+
+# Download R1 — try primary URL, then alts
+download_file() {
+    local URL="$1"
+    local OUT="$2"
+    # ENA FTP paths don't include ftp:// prefix; prepend it
+    local FULL_URL="ftp://${URL}"
+    echo "[INFO] Downloading: ${FULL_URL}"
+    wget -q --tries=3 --timeout=120 -O "${OUT}.tmp" "${FULL_URL}" && mv "${OUT}.tmp" "${OUT}"
+}
+
+R1_OK=false
+for URL in ${R1_URL} ${R1_ALTS}; do
+    if download_file "${URL}" "${R1_OUT}"; then
+        echo "[OK] R1: ${R1_OUT} ($(du -sh "${R1_OUT}" | cut -f1))"
+        R1_OK=true
+        break
     else
-        echo "[WARN] samtools failed for ${URL} — trying next"
-        rm -f "${TMP_BAM}"
+        echo "[WARN] Failed: ${URL} — trying next"
+        rm -f "${R1_OUT}.tmp"
     fi
 done
 
-if [[ -z "$BAM_URL" ]]; then
-    echo "[ERROR] Could not stream HLA reads for ${SAMPLE} from any URL" >&2
+R2_OK=false
+for URL in ${R2_URL} ${R2_ALTS}; do
+    if download_file "${URL}" "${R2_OUT}"; then
+        echo "[OK] R2: ${R2_OUT} ($(du -sh "${R2_OUT}" | cut -f1))"
+        R2_OK=true
+        break
+    else
+        echo "[WARN] Failed: ${URL} — trying next"
+        rm -f "${R2_OUT}.tmp"
+    fi
+done
+
+if [[ "$R1_OK" == "false" ]] || [[ "$R2_OK" == "false" ]]; then
+    echo "[ERROR] Could not download FASTQs for ${SAMPLE}" >&2
     exit 1
 fi
 
-# Coordinate-sort (required for BAM index) and index
-samtools sort -@ 3 -m 2G -o "${BAM_OUT}" "${TMP_BAM}"
-samtools index "${BAM_OUT}"
-rm -f "${TMP_BAM}"
+echo "[OK] ${SAMPLE}: paired FASTQs downloaded"
+DLEOF
 
-NREADS_FINAL=$(samtools view -c "${BAM_OUT}")
-echo "[OK] HLA BAM: ${BAM_OUT} (${NREADS_FINAL} reads, indexed)"
-EXTRACTEOF
-
-    # Substitute placeholders (heredoc can't expand variables inside 'EXTRACTEOF')
+    # Substitute placeholders
     sed -i \
         -e "s|LOGS_PLACEHOLDER|${LOGS_DIR}|g" \
         -e "s|EFFECTIVE_LIST_PLACEHOLDER|${EFFECTIVE_LIST}|g" \
-        -e "s|BAM_DIR_PLACEHOLDER|${BAM_DIR}|g" \
+        -e "s|FASTQ_DIR_PLACEHOLDER|${FASTQ_DIR}|g" \
         -e "s|URL_MAP_PLACEHOLDER|${URL_MAP}|g" \
-        -e "s|HLA_REGION_PLACEHOLDER|${HLA_REGION}|g" \
-        "$EXTRACT_SCRIPT"
+        "$DOWNLOAD_SCRIPT"
 
     CONCURRENT=$([[ "${BATCH_SIZE}" -gt 0 ]] && echo "${BATCH_SIZE}" || echo "10")
-    SBATCH_EXTRACT="sbatch --parsable \
+    SBATCH_DOWNLOAD="sbatch --parsable \
         --account=${PROJECT_ID} \
         --array=1-${N_TOTAL}%${CONCURRENT} \
-        ${EXTRACT_SCRIPT}"
+        ${DOWNLOAD_SCRIPT}"
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo "[DRY-RUN] ${SBATCH_EXTRACT}"
-        EXTRACT_JOB="DRY_RUN_JOB"
+        echo "[DRY-RUN] ${SBATCH_DOWNLOAD}"
+        DOWNLOAD_JOB="DRY_RUN_JOB"
     else
-        EXTRACT_JOB=$(eval "$SBATCH_EXTRACT")
-        echo "[INFO] Phase 0 extraction array submitted: ${EXTRACT_JOB}"
-        PHASE0_DEP="--dependency=afterok:${EXTRACT_JOB}"
+        DOWNLOAD_JOB=$(eval "$SBATCH_DOWNLOAD")
+        echo "[INFO] Phase 0 download array submitted: ${DOWNLOAD_JOB}"
+        PHASE0_DEP="--dependency=afterok:${DOWNLOAD_JOB}"
     fi
 else
-    echo "[SKIP] Phase 0 — using existing HLA BAMs"
+    echo "[SKIP] Phase 0 — using existing FASTQs"
 fi
 
 #-----------------------------------------------------------------------------
@@ -438,29 +453,30 @@ if [[ "$SKIP_TYPING" == "false" ]]; then
     echo ""
     echo "=== Phase 1: Submitting Nextflow typing job ==="
 
-    # Generate samplesheet from extracted FASTQs
-    SAMPLESHEET="${SCRATCH_BASE}/wes_bam_samplesheet.csv"
+    SAMPLESHEET="${SCRATCH_BASE}/rna_fastq_samplesheet.csv"
+
+    # gen_samplesheet.sh: iterates ALL_SAMPLES_LIST so all downloaded FASTQs are included
     cat > "${SCRATCH_BASE}/gen_samplesheet.sh" << GENEOF
 #!/bin/bash
-echo "sample_id,bam_path" > "${SAMPLESHEET}"
+echo "sample_id,fastq_1,fastq_2" > "${SAMPLESHEET}"
 while IFS= read -r SAMPLE; do
-    BAM="${BAM_DIR}/\${SAMPLE}_hla.bam"
-    if [[ -f "\$BAM" ]] && [[ -f "\${BAM}.bai" ]]; then
-        echo "\${SAMPLE},\${BAM}" >> "${SAMPLESHEET}"
+    R1="${FASTQ_DIR}/\${SAMPLE}_R1.fastq.gz"
+    R2="${FASTQ_DIR}/\${SAMPLE}_R2.fastq.gz"
+    if [[ -f "\$R1" ]] && [[ -s "\$R1" ]] && [[ -f "\$R2" ]] && [[ -s "\$R2" ]]; then
+        echo "\${SAMPLE},\${R1},\${R2}" >> "${SAMPLESHEET}"
     else
-        echo "[WARN] Missing HLA BAM for \${SAMPLE} — skipped" >&2
+        echo "[WARN] Missing FASTQs for \${SAMPLE} — skipped" >&2
     fi
 done < "${ALL_SAMPLES_LIST}"
 echo "[OK] Samplesheet: ${SAMPLESHEET} (\$(tail -n +2 ${SAMPLESHEET} | wc -l) samples)"
 GENEOF
 
-    # NOTE: samplesheet is generated inside the Phase 1 SLURM job (after Phase 0 FASTQs are ready)
     echo "[INFO] Samplesheet will be generated in Phase 1 job: ${SAMPLESHEET}"
 
     TYPING_SCRIPT="${SCRATCH_BASE}/phase1_typing.sh"
     cat > "$TYPING_SCRIPT" << TYPINGEOF
 #!/bin/bash
-#SBATCH --job-name=wes_typing
+#SBATCH --job-name=rna_typing
 #SBATCH --account=${PROJECT_ID}
 #SBATCH --partition=small
 #SBATCH --time=72:00:00
@@ -474,13 +490,13 @@ module purge
 module load nextflow 2>/dev/null || module load nextflow/23.10.0
 module load apptainer 2>/dev/null || true
 
-echo "=== Phase 1: HLA Typing (WES) ==="
+echo "=== Phase 1: HLA Typing (RNA-seq) ==="
 echo "Date: \$(date)"
 echo "Samplesheet: ${SAMPLESHEET}"
 
 cd "${INSTALL_DIR}"
 
-# Regenerate samplesheet in case Phase 0 completed after original run
+# Regenerate samplesheet (captures all FASTQs downloaded in Phase 0)
 bash "${SCRATCH_BASE}/gen_samplesheet.sh"
 
 N_SAMPLES_SHEET=\$(tail -n +2 "${SAMPLESHEET}" | wc -l)
@@ -488,8 +504,7 @@ echo "Samples to type: \${N_SAMPLES_SHEET}"
 
 nextflow run main.nf \\
     --input_samplesheet "${SAMPLESHEET}" \\
-    --seq_type wes \\
-    --reference hg19 \\
+    --seq_type rna \\
     --tools "${TOOLS}" \\
     --weighting equal \\
     --skip_qc true \\
@@ -498,8 +513,8 @@ nextflow run main.nf \\
     -c conf/puhti.config \\
     -profile apptainer \\
     -resume \\
-    -with-trace "${RESULTS_DIR}/pipeline_info/trace_wes.txt" \\
-    -with-report "${RESULTS_DIR}/pipeline_info/report_wes.html" \\
+    -with-trace "${RESULTS_DIR}/pipeline_info/trace_rna.txt" \\
+    -with-report "${RESULTS_DIR}/pipeline_info/report_rna.html" \\
     -work-dir "${SCRATCH_BASE}/work"
 
 echo ""
@@ -528,7 +543,7 @@ fi
 COLLECT_SCRIPT="${SCRATCH_BASE}/phase1b_collect.sh"
 cat > "$COLLECT_SCRIPT" << COLLECTEOF
 #!/bin/bash
-#SBATCH --job-name=wes_collect
+#SBATCH --job-name=rna_collect
 #SBATCH --account=${PROJECT_ID}
 #SBATCH --partition=small
 #SBATCH --time=01:00:00
@@ -538,7 +553,7 @@ cat > "$COLLECT_SCRIPT" << COLLECTEOF
 #SBATCH --error=${LOGS_DIR}/collect_%j.err
 
 set -euo pipefail
-echo "=== Phase 1b: Collecting WES results ==="
+echo "=== Phase 1b: Collecting RNA-seq results ==="
 echo "Date: \$(date)"
 
 for TOOL in \$(echo "${TOOLS}" | tr ',' ' '); do
@@ -555,7 +570,7 @@ while IFS= read -r SAMPLE; do
             TOTAL=\$((TOTAL+1))
         fi
     done
-done < "${EFFECTIVE_LIST}"
+done < "${ALL_SAMPLES_LIST}"
 
 echo ""
 echo "Symlinks created: \$TOTAL"
@@ -566,10 +581,11 @@ for TOOL in \$(echo "${TOOLS}" | tr ',' ' '); do
     printf "  %-12s %3d samples\n" "\$TOOL" "\$N"
 done
 
-# Cleanup: delete HLA BAMs to free scratch space (skip if --keep-inputs)
+# Cleanup: delete FASTQs to free scratch space (skip if --keep-inputs)
+# Geuvadis FASTQs are 3-8 GB/pair; 50 samples could use 150-400 GB without cleanup
 if [[ "KEEP_INPUTS_PLACEHOLDER" == "false" ]]; then
     echo ""
-    echo "=== Cleanup: deleting HLA BAMs to free scratch space ==="
+    echo "=== Cleanup: deleting FASTQs to free scratch space ==="
     CLEANED=0
     SKIPPED_CLEAN=0
     mkdir -p "PROCESSED_DIR_PLACEHOLDER"
@@ -578,20 +594,20 @@ if [[ "KEEP_INPUTS_PLACEHOLDER" == "false" ]]; then
                       -name "\${SAMPLE}_*.txt" 2>/dev/null | wc -l || true)
         N_RES=\${N_RES:-0}
         if [[ "\${N_RES}" -gt 0 ]]; then
-            rm -f "BAM_DIR_PLACEHOLDER/\${SAMPLE}_hla.bam" \
-                  "BAM_DIR_PLACEHOLDER/\${SAMPLE}_hla.bam.bai"
+            rm -f "FASTQ_DIR_PLACEHOLDER/\${SAMPLE}_R1.fastq.gz" \
+                  "FASTQ_DIR_PLACEHOLDER/\${SAMPLE}_R2.fastq.gz"
             touch "PROCESSED_DIR_PLACEHOLDER/\${SAMPLE}.done"
             echo "[OK] Cleaned: \${SAMPLE} (\${N_RES} tool results)"
             CLEANED=\$((CLEANED+1))
         else
-            echo "[WARN] No results for \${SAMPLE} — keeping BAM" >&2
+            echo "[WARN] No results for \${SAMPLE} — keeping FASTQs" >&2
             SKIPPED_CLEAN=\$((SKIPPED_CLEAN+1))
         fi
     done < "EFFECTIVE_LIST_PLACEHOLDER"
-    echo "Cleaned: \${CLEANED} BAMs deleted, \${SKIPPED_CLEAN} kept (no results yet)"
+    echo "Cleaned: \${CLEANED} FASTQ pairs deleted, \${SKIPPED_CLEAN} kept (no results yet)"
 else
     echo ""
-    echo "[INFO] --keep-inputs set: HLA BAMs retained"
+    echo "[INFO] --keep-inputs set: FASTQs retained"
 fi
 COLLECTEOF
 
@@ -600,7 +616,7 @@ sed -i \
     -e "s|PROCESSED_DIR_PLACEHOLDER|${PROCESSED_DIR}|g" \
     -e "s|EFFECTIVE_LIST_PLACEHOLDER|${EFFECTIVE_LIST}|g" \
     -e "s|BY_TOOL_DIR_PLACEHOLDER|${BY_TOOL_DIR}|g" \
-    -e "s|BAM_DIR_PLACEHOLDER|${BAM_DIR}|g" \
+    -e "s|FASTQ_DIR_PLACEHOLDER|${FASTQ_DIR}|g" \
     "${COLLECT_SCRIPT}"
 
 SBATCH_COLLECT="sbatch --parsable \
@@ -619,12 +635,12 @@ fi
 # Phase 2: Calibrate weights + compare voting strategies
 #-----------------------------------------------------------------------------
 CALIBRATE_SCRIPT="${SCRATCH_BASE}/phase2_calibrate.sh"
-COMPARE_OUT="${SCRATCH_BASE}/strategy_comparison_wes_calibrated.tsv"
-COMPARE_RC_OUT="${SCRATCH_BASE}/strategy_comparison_wes_rc.tsv"
+COMPARE_OUT="${SCRATCH_BASE}/strategy_comparison_rna_calibrated.tsv"
+COMPARE_RC_OUT="${SCRATCH_BASE}/strategy_comparison_rna_rc.tsv"
 
 cat > "$CALIBRATE_SCRIPT" << CALEOF
 #!/bin/bash
-#SBATCH --job-name=wes_calibrate
+#SBATCH --job-name=rna_calibrate
 #SBATCH --account=${PROJECT_ID}
 #SBATCH --partition=small
 #SBATCH --time=02:00:00
@@ -634,7 +650,7 @@ cat > "$CALIBRATE_SCRIPT" << CALEOF
 #SBATCH --error=${LOGS_DIR}/calibrate_%j.err
 
 set -euo pipefail
-echo "=== Phase 2: WES HLA Tool Weight Calibration ==="
+echo "=== Phase 2: RNA-seq HLA Tool Weight Calibration ==="
 echo "Date: \$(date)"
 echo ""
 
@@ -663,7 +679,7 @@ fi
 
 # Calibrate
 echo ""
-echo "[INFO] Running WES calibration (genes: ${GENES})..."
+echo "[INFO] Running RNA-seq calibration (genes: ${GENES})..."
 POP_FILE_ARG=""
 [[ -f "${POP_FILE}" ]] && POP_FILE_ARG="--population-file ${POP_FILE}"
 
@@ -671,7 +687,7 @@ POP_FILE_ARG=""
 python3 "${INSTALL_DIR}/bin/calibrate_tool_weights.py" calibrate \\
     --ground-truth "${GT_FILE}" \\
     --results-dir "${BY_TOOL_DIR}" \\
-    --data-type wes \\
+    --data-type rna \\
     --genes "${GENES}" \\
     --resolution "${RESOLUTION}" \\
     --output-weights "${WEIGHTS_OUT}" \\
@@ -690,7 +706,7 @@ try:
     with open('${WEIGHTS_OUT}') as f:
         w = json.load(f)
     n = w.get('n_samples', '?')
-    print(f'\nWES calibrated weights (n={n} samples):')
+    print(f'\nRNA-seq calibrated weights (n={n} samples):')
     genes = list(w.get('genes', {}).keys())
     tools = sorted({t for g in w['genes'].values() for t in g.keys()})
     header = f"{'Gene':<8}" + "".join(f"  {t:<12}" for t in tools)
@@ -737,7 +753,7 @@ fi
 
 echo ""
 echo "================================================================="
-echo " WES Calibration Complete"
+echo " RNA-seq Calibration Complete"
 echo "================================================================="
 echo " Weights:      ${WEIGHTS_OUT}"
 echo " Accuracy:     ${TABLE_OUT}"
@@ -745,7 +761,7 @@ echo " Accuracy:     ${TABLE_OUT}"
 [[ -f "${COMPARE_RC_OUT}" ]] && echo " Strat(rc):    ${COMPARE_RC_OUT}"
 echo ""
 echo " Next: push updated weights to GitHub and rerun pipeline"
-echo "   --weighting calibrated --weights_file conf/tool_weights_wes_v1.json"
+echo "   --weighting calibrated --weights_file conf/tool_weights_rna_v1.json"
 echo "================================================================="
 CALEOF
 
@@ -765,7 +781,7 @@ echo "==================================================================="
 echo " All jobs submitted."
 echo ""
 echo " Monitor: squeue -u \$USER"
-echo " Status:  bash scripts/run_wes_calibration_puhti.sh --status"
+echo " Status:  bash scripts/run_rna_calibration_puhti.sh --status"
 echo " Logs:    ${LOGS_DIR}/"
 echo ""
 echo " Expected outputs:"
