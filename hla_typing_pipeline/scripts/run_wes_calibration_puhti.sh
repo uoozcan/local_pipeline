@@ -481,6 +481,7 @@ nextflow run main.nf \\
     --tools "${TOOLS}" \\
     --weighting equal \\
     --skip_qc true \\
+    --project "${PROJECT_ID}" \\
     --outdir "${RESULTS_DIR}" \\
     -c conf/puhti.config \\
     -profile apptainer \\
