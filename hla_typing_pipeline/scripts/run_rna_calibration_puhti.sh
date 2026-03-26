@@ -772,11 +772,17 @@ SBATCH_CAL="sbatch --parsable \
     --dependency=afterok:${COLLECT_JOB} \
     ${CALIBRATE_SCRIPT}"
 
-if [[ "$DRY_RUN" == "true" ]]; then
-    echo "[DRY-RUN] ${SBATCH_CAL}"
+REMAINING=$(( N_PENDING - N_TOTAL ))
+if [[ "$CALIBRATE_ONLY" == "true" ]] || [[ "$REMAINING" -eq 0 ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "[DRY-RUN] ${SBATCH_CAL}"
+    else
+        CALIBRATE_JOB=$(eval "$SBATCH_CAL")
+        echo "[INFO] Phase 2 calibration job submitted: ${CALIBRATE_JOB}"
+    fi
 else
-    CALIBRATE_JOB=$(eval "$SBATCH_CAL")
-    echo "[INFO] Phase 2 calibration job submitted: ${CALIBRATE_JOB}"
+    echo "[INFO] ${REMAINING} sample(s) still pending — skipping Phase 2 calibration."
+    echo "[INFO] Re-run script for next batch. Use --calibrate-only when all batches complete."
 fi
 
 echo ""
