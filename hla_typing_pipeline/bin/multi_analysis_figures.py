@@ -13,6 +13,7 @@ Figures produced:
   M4  Data-type-specific consensus weights (requires ≥1 weights JSON)
   M5  Population-stratified accuracy (requires by_population TSV)
   M6  Pipeline information flow diagram (always produced)
+  M7  Cross-analysis resource profiling: runtime, RAM, CPU (requires --*-trace-dir)
 
 Usage:
     python3 bin/multi_analysis_figures.py \\
@@ -32,8 +33,10 @@ Usage:
 import argparse
 import base64
 import json
+import re
 import sys
 import warnings
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -145,6 +148,117 @@ def _load_population(path):
 def _gene_cols(df):
     extras = [c for c in df.columns if c not in GENE_ORDER and c.upper() == c and c not in ("NA",)]
     return [g for g in GENE_ORDER if g in df.columns] + extras
+
+
+# ─── Trace-file helpers (for M7) ─────────────────────────────────────────────
+
+# Nextflow process name → short tool key
+PROCESS_TO_TOOL = {
+    "HLAHD":           "hlahd",
+    "HLAHD_FASTQ":     "hlahd",
+    "SPECHLA":         "spechla",
+    "SPECHLA_FASTQ":   "spechla",
+    "ARCASHLA":        "arcashla",
+    "ARCASHLA_FASTQ":  "arcashla",
+    "OPTITYPE":        "optitype",
+    "OPTITYPE_FASTQ":  "optitype",
+    "KOURAMI":         "kourami",
+    "POLYSOLVER":      "polysolver",
+    "SEQ2HLA":         "seq2hla",
+    "SEQ2HLA_FASTQ":   "seq2hla",
+    "T1K":             "t1k",
+    "T1K_FASTQ":       "t1k",
+}
+
+
+def _parse_duration(s):
+    """Convert Nextflow duration string to seconds.  e.g. '8m 19s' → 499.0"""
+    if not s or s.strip() in ("-", ""):
+        return 0.0
+    total = 0.0
+    for val, unit in re.findall(r"([\d.]+)\s*(d|h|m|s|ms|us)", s):
+        v = float(val)
+        if unit == "d":    total += v * 86400
+        elif unit == "h":  total += v * 3600
+        elif unit == "m":  total += v * 60
+        elif unit == "s":  total += v
+        elif unit == "ms": total += v / 1000
+        elif unit == "us": total += v / 1_000_000
+    return total
+
+
+def _parse_memory(s):
+    """Convert Nextflow memory string to GB.  e.g. '2.6 GB' → 2.6"""
+    if not s or s.strip() in ("-", ""):
+        return 0.0
+    m = re.match(r"([\d.]+)\s*(B|KB|MB|GB|TB)", s.strip(), re.IGNORECASE)
+    if not m:
+        return 0.0
+    val, unit = float(m.group(1)), m.group(2).upper()
+    return {"B": val/1e9, "KB": val/1e6, "MB": val/1e3, "GB": val, "TB": val*1e3}.get(unit, 0.0)
+
+
+def _parse_cpu(s):
+    """Parse CPU percentage.  e.g. '659.0%' → 659.0"""
+    if not s or s.strip() in ("-", ""):
+        return 0.0
+    return float(s.strip().rstrip("%"))
+
+
+def _load_traces(trace_dir):
+    """
+    Load trace_*.txt files from *trace_dir*.  Returns list of dicts with keys:
+        tool, realtime_s, peak_rss_gb, cpu_pct
+    Only COMPLETED/CACHED rows for known HLA typing processes are kept.
+    """
+    trace_dir = Path(trace_dir)
+    trace_files = sorted(trace_dir.glob("trace_*.txt"))
+    if not trace_files:
+        trace_files = sorted(trace_dir.glob("trace*.txt"))
+    if not trace_files:
+        print(f"  [WARN] No trace_*.txt files in {trace_dir}")
+        return []
+
+    records = []
+    for tf in trace_files:
+        try:
+            with open(tf) as fh:
+                header = fh.readline().strip()
+                sep = "\t" if "\t" in header else None
+                cols = header.split("\t") if sep else re.split(r"\s{2,}", header)
+                cols = [c.strip() for c in cols]
+                idx = {c: i for i, c in enumerate(cols)}
+
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split("\t") if sep else re.split(r"\s{2,}", line)
+                    parts = [p.strip() for p in parts]
+
+                    def _get(col, default=""):
+                        i = idx.get(col, -1)
+                        return parts[i] if 0 <= i < len(parts) else default
+
+                    if _get("status").lower() not in ("completed", "ok", "cached"):
+                        continue
+                    process = _get("name", "").split(" ")[0].split(":")[0].upper()
+                    tool = PROCESS_TO_TOOL.get(process)
+                    if tool is None:
+                        continue
+                    rt = _parse_duration(_get("realtime"))
+                    if rt > 0:
+                        records.append({
+                            "tool":        tool,
+                            "realtime_s":  rt,
+                            "peak_rss_gb": _parse_memory(_get("peak_rss")),
+                            "cpu_pct":     _parse_cpu(_get("%cpu")),
+                        })
+        except Exception as e:
+            print(f"  [WARN] Could not parse {tf.name}: {e}")
+
+    print(f"  {len(records)} completed task records from {len(trace_files)} trace file(s)")
+    return records
 
 
 # ─── Figure M1: Cross-analysis accuracy comparison ───────────────────────────
@@ -661,6 +775,127 @@ def fig_M6_information_flow(out_dir):
     print(f"  Saved: {out_dir / 'M6_information_flow.png'}")
 
 
+# ─── Figure M7: Cross-analysis resource profiling ────────────────────────────
+
+def fig_M7_resources(trace_data, out_dir, system_ram_gb=32.0):
+    """
+    Three-panel grouped boxplot: runtime (min) | peak RAM (GB) | CPU (%).
+    *trace_data* is a dict {"wgs": [records], "wes": [records], "rna": [records]};
+    only non-empty keys are plotted.
+    """
+    active = {dt: recs for dt, recs in trace_data.items() if recs}
+    if not active:
+        print("  [SKIP M7] No trace data available")
+        return
+
+    # Aggregate: by_tool[dt][tool] = list of values
+    def _agg(recs, key):
+        d = defaultdict(list)
+        for r in recs:
+            v = r[key]
+            if v > 0:
+                d[r["tool"]].append(v)
+        return d
+
+    metrics = [
+        ("realtime_s",  "Runtime (minutes)",   lambda v: v / 60.0),
+        ("peak_rss_gb", "Peak RAM (GB)",        lambda v: v),
+        ("cpu_pct",     "CPU utilisation (%)",  lambda v: v),
+    ]
+
+    # Union of tools across all data types, sorted by mean runtime descending
+    all_tools = sorted(
+        {r["tool"] for recs in active.values() for r in recs},
+        key=lambda t: TOOL_LABELS.get(t, t)
+    )
+    if not all_tools:
+        print("  [SKIP M7] No recognised tool records in trace files")
+        return
+
+    n_dt  = len(active)
+    w     = 0.7 / n_dt          # box width
+    offsets = np.linspace(-(n_dt - 1) * w / 2, (n_dt - 1) * w / 2, n_dt)
+    dt_list = list(active.keys())
+    rng = np.random.default_rng(42)
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, max(5, len(all_tools) * 0.7 + 2)))
+
+    for ax, (key, ylabel, scale_fn) in zip(axes, metrics):
+        x_positions = np.arange(len(all_tools))
+
+        for di, dt in enumerate(dt_list):
+            by_tool = _agg(active[dt], key)
+            color   = DT_COLORS[dt]
+            pos_off = offsets[di]
+
+            for xi, tool in enumerate(all_tools):
+                vals = [scale_fn(v) for v in by_tool.get(tool, []) if scale_fn(v) > 0]
+                if not vals:
+                    continue
+                pos = xi + pos_off
+                bp = ax.boxplot(
+                    vals,
+                    positions=[pos],
+                    widths=w * 0.85,
+                    vert=True,
+                    patch_artist=True,
+                    flierprops=dict(marker="", linestyle="none"),
+                    medianprops=dict(color="white", linewidth=2),
+                    whiskerprops=dict(color="#555", linewidth=1),
+                    capprops=dict(color="#555", linewidth=1),
+                    boxprops=dict(linewidth=0.5),
+                )
+                bp["boxes"][0].set_facecolor(color)
+                bp["boxes"][0].set_alpha(0.75)
+                # Jitter overlay
+                jitter = rng.normal(0, w * 0.1, len(vals))
+                ax.scatter([pos + j for j in jitter], vals,
+                           color=color, alpha=0.55, s=14, zorder=5,
+                           edgecolors="white", linewidths=0.3)
+
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels([tl(t) for t in all_tools], rotation=40, ha="right", fontsize=9)
+        ax.set_ylabel(ylabel, fontsize=10)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.grid(axis="y", alpha=0.3, linestyle="--")
+
+        # Extra reference lines
+        if key == "peak_rss_gb":
+            ax.axhline(system_ram_gb, color="#C62828", linestyle="--", lw=1.2, alpha=0.7,
+                       label=f"System RAM ({system_ram_gb:.0f} GB)")
+            ax.legend(fontsize=8, loc="upper right")
+        elif key == "cpu_pct":
+            for cores in [100, 200, 400, 800]:
+                ax.axhline(cores, color="#BDBDBD", linestyle=":", lw=0.8)
+                ax.text(len(all_tools) - 0.3, cores + 5, f"{cores//100}×",
+                        fontsize=7, color="#9E9E9E", va="bottom")
+
+        # Log scale for runtime if range > 10×
+        if key == "realtime_s":
+            all_vals = [scale_fn(r[key]) for recs in active.values()
+                        for r in recs if r[key] > 0]
+            if all_vals and max(all_vals) / max(min(all_vals), 0.01) > 10:
+                ax.set_yscale("log")
+                ax.set_ylabel("Runtime (minutes, log scale)", fontsize=10)
+
+    # Legend
+    legend_handles = [mpatches.Patch(color=DT_COLORS[dt], label=DT_LABELS[dt], alpha=0.85)
+                      for dt in dt_list]
+    axes[0].legend(handles=legend_handles, fontsize=9, loc="upper right")
+
+    n_total = sum(len(recs) for recs in active.values())
+    fig.suptitle(
+        f"Figure M7 — HLA Tool Resource Profiling Across Analysis Types  (N={n_total} tasks)",
+        fontsize=12, fontweight="bold"
+    )
+    fig.tight_layout()
+    out = out_dir / "M7_resource_profiling.png"
+    fig.savefig(out, dpi=DPI, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {out}")
+
+
 # ─── HTML report ──────────────────────────────────────────────────────────────
 
 FIGURE_META = {
@@ -723,6 +958,18 @@ FIGURE_META = {
             "The calibration feedback loop uses 1KGP ground-truth genotypes to derive data-type-specific "
             "tool weights, which are then used to improve subsequent consensus calls. Output includes "
             "high-resolution HLA alleles, per-locus confidence scores, LOH analysis, and HTML reports."
+        ),
+    },
+    "M7_resource_profiling.png": {
+        "title": "Figure M7 — Computational Resource Requirements per Tool and Data Type",
+        "caption": (
+            "Grouped boxplots of wall-clock runtime (minutes), peak resident memory (GB), and CPU "
+            "utilisation (%, 100% = 1 core) for each HLA typing tool, coloured by analysis type "
+            "(WGS = dark blue, WES = orange, RNA-seq = green). Derived from Nextflow trace files "
+            "collected during 1KGP calibration runs. Highlights tools with high resource demands "
+            "(e.g., Kourami ~8 h, HLA-HD class II ~20–60 min) and justifies the pipeline's "
+            "parallel execution design on HPC. Resource profiles differ across data types, "
+            "reflecting differences in input file size and algorithmic complexity."
         ),
     },
 }
@@ -847,6 +1094,11 @@ def main():
                         help=f"Path to strategy_comparison_{dt}_calibrated.tsv")
     ap.add_argument("--population", default=None,
                     help="Path to tool_accuracy_wgs_by_population.tsv")
+    for dt in ["wgs", "wes", "rna"]:
+        ap.add_argument(f"--{dt}-trace-dir", default=None,
+                        help=f"Directory with {dt.upper()} Nextflow trace_*.txt files (for M7)")
+    ap.add_argument("--system-ram", type=float, default=32.0,
+                    help="System RAM limit in GB shown as reference line in M7 (default: 32)")
     ap.add_argument("--outdir", required=True,
                     help="Output directory for figures and HTML report")
     args = ap.parse_args()
@@ -873,6 +1125,15 @@ def main():
     }
     pop_df  = _load_population(args.population)
     wgs_acc = acc_dict.get("wgs")
+
+    trace_dict = {}
+    for dt in ["wgs", "wes", "rna"]:
+        tdir = getattr(args, f"{dt}_trace_dir")
+        if tdir:
+            print(f"  Loading {dt.upper()} traces from {tdir}")
+            recs = _load_traces(tdir)
+            if recs:
+                trace_dict[dt] = recs
 
     loaded = [dt for dt, df in acc_dict.items() if df is not None]
     print(f"  Accuracy data: {loaded or 'none'}")
@@ -903,6 +1164,10 @@ def main():
     print("  M6: Information flow diagram")
     fig_M6_information_flow(out_dir)
     generated.append("M6_information_flow.png")
+
+    print("  M7: Resource profiling")
+    fig_M7_resources(trace_dict, out_dir, system_ram_gb=args.system_ram)
+    generated.append("M7_resource_profiling.png")
 
     print("  HTML report")
     write_html(out_dir, acc_dict, weights_dict,
