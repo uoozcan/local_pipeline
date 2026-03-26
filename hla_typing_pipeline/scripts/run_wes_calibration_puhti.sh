@@ -177,9 +177,8 @@ if [[ "$STATUS_ONLY" == "true" ]]; then
     echo "Master list: ${N_ALL} samples total"
     echo ""
     echo "Phase 0 — HLA BAMs downloaded:"
-    N_BAM=$(find "${BAM_DIR}" -name "*_hla.bam" 2>/dev/null | wc -l || true)
-    N_BAM=$(echo "${N_BAM}" | tr -d '[:space:]'); N_BAM=${N_BAM:-0}
-    echo "  ${N_BAM} / ${N_ALL} samples done   (${N_PENDING} pending)"
+    N_DONE=$(( N_ALL - N_PENDING ))
+    echo "  ${N_DONE} / ${N_ALL} samples done   (${N_PENDING} pending)"
     echo ""
     echo "Phase 1 — Typing results:"
     for TOOL in $(echo "$TOOLS" | tr ',' ' '); do
@@ -255,7 +254,7 @@ if [[ -f "$URL_MAP" ]]; then
     fi
 fi
 
-if [[ ! -f "$URL_MAP" ]] && [[ "$DRY_RUN" == "false" ]]; then
+if [[ "$DRY_RUN" == "false" ]]; then
     echo "[INFO] Building sample→BAM URL map from population panel..."
     python3 - << PYEOF
 import sys, os
@@ -439,7 +438,7 @@ while IFS= read -r SAMPLE; do
     else
         echo "[WARN] Missing HLA BAM for \${SAMPLE} — skipped" >&2
     fi
-done < "${EFFECTIVE_LIST}"
+done < "${ALL_SAMPLES_LIST}"
 echo "[OK] Samplesheet: ${SAMPLESHEET} (\$(tail -n +2 ${SAMPLESHEET} | wc -l) samples)"
 GENEOF
 
