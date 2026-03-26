@@ -460,7 +460,7 @@ GENEOF
 set -euo pipefail
 module purge
 module load nextflow 2>/dev/null || module load nextflow/23.10.0
-module load apptainer 2>/dev/null || module load singularity
+module load apptainer 2>/dev/null || true
 
 echo "=== Phase 1: HLA Typing (WES) ==="
 echo "Date: \$(date)"
