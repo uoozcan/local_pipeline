@@ -8,16 +8,18 @@
 #   OR: the run script auto-filters against GT and ENA metadata at runtime
 #
 # AFR/YRI (Gourraud 2014 confirmed, present in Geuvadis ERP001942)
-NA18498
-NA18499
+# NA18498, NA18499, NA18510, NA18511 removed — not in Gourraud 2014 GT
+# Replaced with: NA18500, NA18506, NA18516, NA18519
+NA18500
 NA18501
 NA18502
 NA18504
 NA18505
+NA18506
 NA18507
 NA18508
-NA18510
-NA18511
+NA18516
+NA18519
 #
 # EUR/CEU (Gourraud 2014 confirmed, present in Geuvadis ERP001942)
 NA06985

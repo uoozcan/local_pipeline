@@ -58,7 +58,7 @@ KEEP_INPUTS=false   # set true to retain downloaded FASTQs after Phase 1b
 
 # ENA project for Geuvadis RNA-seq
 ENA_PROJECT="ERP001942"
-ENA_META_URL="https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${ENA_PROJECT}&result=read_run&fields=sample_accession,run_accession,fastq_ftp&format=tsv"
+ENA_META_URL="https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${ENA_PROJECT}&result=read_run&fields=sample_alias,sample_accession,run_accession,fastq_ftp&format=tsv"
 
 #-----------------------------------------------------------------------------
 # Argument parsing
@@ -277,7 +277,7 @@ with open(meta_file) as fh:
             header = parts
             # Find column indices
             try:
-                i_sample = header.index("sample_accession")
+                i_sample = header.index("sample_alias")   # 1KGP ID (NA18501 etc.), not SAMEA
                 i_run    = header.index("run_accession")
                 i_ftp    = header.index("fastq_ftp")
             except ValueError:
