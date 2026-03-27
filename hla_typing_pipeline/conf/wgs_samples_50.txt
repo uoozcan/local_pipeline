@@ -2,6 +2,8 @@
 # Balanced across 5 populations (10 each)
 # Curated against the GT TSV produced by:
 #   python3 bin/calibrate_tool_weights.py download-gt
+# Source directory:
+#   https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/working/20140725_hla_genotypes/
 # and ENA PRJEB31736 metadata (NYGC 30x CRAM availability)
 # CRAMs at ENA: ftp.sra.ebi.ac.uk/vol1/run/{ERR6}/{ERR}/{SAMPLE}.final.cram
 # (ERR accessions fetched from ENA: PRJEB31736)
