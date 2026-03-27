@@ -274,7 +274,7 @@ if [[ "$SKIP_CONTAINERS" != true ]]; then
     fi
 
     # 9. SpecHLA — local installation (container fermi2 crashes with SIGABRT on Puhti architecture)
-    SPECHLA_LOCAL="/projappl/${PROJECT_ID}/SpecHLA"
+    SPECHLA_LOCAL="/projappl/${PROJECT_ID}/SpecHLAx"
     log "Installing SpecHLA locally at ${SPECHLA_LOCAL}..."
     if [[ ! -f "${SPECHLA_LOCAL}/script/whole/SpecHLA.sh" ]]; then
         # Clone repository
