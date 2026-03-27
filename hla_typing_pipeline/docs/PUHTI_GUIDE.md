@@ -365,6 +365,8 @@ For WES and RNA, do not resubmit active jobs; inspect existing `typing_*.out/.er
 `collect_*.out/.err`, and Nextflow trace/report files first, then rerun only if the jobs are stalled or failed.
 For a compact non-destructive summary across all three E2E runs, use:
 `bash scripts/check_e2e_puhti_status.sh --project project_2008084`
+E2E typing jobs intentionally do not use Nextflow `-resume`, so repeated single-sample tests are not blocked by stale session locks.
+E2E Phase 2 now fails non-zero when zero requested typing tools produce outputs; partial output is reported as `WARN`, and full output as `PASS`.
 
 ### Common Issues
 

@@ -610,7 +610,6 @@ nextflow run main.nf \\
     --outdir "${RESULTS_DIR}" \\
     -c conf/puhti.config \\
     -profile apptainer \\
-    -resume \\
     -with-trace "${RESULTS_DIR}/pipeline_info/trace_test_${TYPE}.txt" \\
     -with-report "${RESULTS_DIR}/pipeline_info/report_test_${TYPE}.html" \\
     -work-dir "${SCRATCH_BASE}/work"
@@ -721,6 +720,7 @@ rm -rf "\${TMP_REPORT_DIR}"
 echo ""
 echo "=== Summary ==="
 N_PASS=0; N_FAIL=0
+TOTAL_TOOLS=\$(echo "${TOOLS}" | tr ',' '\n' | wc -l)
 for TOOL in \$(echo "${TOOLS}" | tr ',' ' '); do
     SRC="${RESULTS_DIR}/${SAMPLE}/\${TOOL}/${SAMPLE}_\${TOOL}.txt"
     if [[ -f "\$SRC" ]]; then
@@ -732,8 +732,20 @@ for TOOL in \$(echo "${TOOLS}" | tr ',' ' '); do
     fi
 done
 echo ""
-echo "Result: \${N_PASS}/\$(echo "${TOOLS}" | tr ',' '\n' | wc -l) tools produced output"
-[[ "\${N_FAIL}" -eq 0 ]] && echo "STATUS: PASS" || echo "STATUS: WARN (\${N_FAIL} tools missing)"
+echo "Result: \${N_PASS}/\${TOTAL_TOOLS} tools produced output"
+if [[ "\${N_PASS}" -eq 0 ]]; then
+    echo "STATUS: FAIL (0 tools produced output)"
+    echo "Reason: Phase 1 completed, but every requested tool failed or was ignored."
+    echo "Action: inspect ${LOGS_DIR}/test_typing.out and ${LOGS_DIR}/test_typing.err for tool-level failures."
+    echo ""
+    echo "Full report saved: ${REPORT_FILE}"
+    echo "SLURM logs:        ${LOGS_DIR}/"
+    exit 2
+elif [[ "\${N_FAIL}" -eq 0 ]]; then
+    echo "STATUS: PASS"
+else
+    echo "STATUS: WARN (\${N_FAIL} tools missing)"
+fi
 echo ""
 echo "Full report saved: ${REPORT_FILE}"
 echo "SLURM logs:        ${LOGS_DIR}/"
