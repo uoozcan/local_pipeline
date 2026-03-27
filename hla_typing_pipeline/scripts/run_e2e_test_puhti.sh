@@ -206,15 +206,17 @@ echo ""
 #-----------------------------------------------------------------------------
 if [[ "$SKIP_DOWNLOAD" == "false" ]]; then
 
-    # Download ENA metadata if needed
-    if [[ ! -f "${ENA_META}" ]] && [[ "$DRY_RUN" == "false" ]]; then
-        echo "[INFO] Downloading ENA metadata for ${ENA_PROJECT}..."
-        curl -s "${ENA_META_URL}" > "${ENA_META}" \
-            || wget -q -O "${ENA_META}" "${ENA_META_URL}" \
-            || { echo "[ERROR] Could not download ENA run table"; exit 1; }
-        echo "[OK] ENA metadata: ${ENA_META} ($(wc -l < "${ENA_META}") entries)"
-    else
-        [[ "$DRY_RUN" == "false" ]] && echo "[INFO] Using cached ENA metadata: ${ENA_META}"
+    # Download ENA metadata if needed (WGS/RNA only; WES uses the population panel)
+    if [[ "$TYPE" != "wes" ]]; then
+        if [[ ! -f "${ENA_META}" ]] && [[ "$DRY_RUN" == "false" ]]; then
+            echo "[INFO] Downloading ENA metadata for ${ENA_PROJECT}..."
+            curl -s "${ENA_META_URL}" > "${ENA_META}" \
+                || wget -q -O "${ENA_META}" "${ENA_META_URL}" \
+                || { echo "[ERROR] Could not download ENA run table"; exit 1; }
+            echo "[OK] ENA metadata: ${ENA_META} ($(wc -l < "${ENA_META}") entries)"
+        else
+            [[ "$DRY_RUN" == "false" ]] && echo "[INFO] Using cached ENA metadata: ${ENA_META}"
+        fi
     fi
 
     # Build URL map (type-specific)
@@ -675,28 +677,46 @@ done
 echo ""
 echo "=== Test Report ==="
 
-# Generate report using calibrate_tool_weights.py inspect
-if [[ -f "${GT_FILE}" ]]; then
-    python3 "${INSTALL_DIR}/bin/calibrate_tool_weights.py" inspect \\
-        --ground-truth "${GT_FILE}" \\
-        --results-dir  "${BY_TOOL_DIR}" \\
-        --sample       "${SAMPLE}" \\
-        --genes        A,B,C,DRB1,DQB1 \\
-        2>&1 | tee "${REPORT_FILE}"
-else
-    echo "[WARN] GT file not found: ${GT_FILE}"
-    echo "[INFO] Showing raw tool outputs:"
-    for TOOL in \$(echo "${TOOLS}" | tr ',' ' '); do
-        SRC="${RESULTS_DIR}/${SAMPLE}/\${TOOL}/${SAMPLE}_\${TOOL}.txt"
-        if [[ -f "\$SRC" ]]; then
+# Generate report using per-tool inspect output filtered to this sample
+TMP_REPORT_DIR=\$(mktemp -d)
+{
+    if [[ -f "${GT_FILE}" ]]; then
+        echo "[INFO] GT-backed concordance for ${SAMPLE}"
+        for TOOL in \$(echo "${TOOLS}" | tr ',' ' '); do
+            SRC="${RESULTS_DIR}/${SAMPLE}/\${TOOL}/${SAMPLE}_\${TOOL}.txt"
             echo ""
             echo "--- \${TOOL} ---"
-            cat "\$SRC"
-        else
-            echo "--- \${TOOL}: NO OUTPUT ---"
-        fi
-    done
-fi | tee "${REPORT_FILE}"
+            if [[ ! -f "\$SRC" ]]; then
+                echo "NO OUTPUT"
+                continue
+            fi
+
+            TOOL_TSV="\${TMP_REPORT_DIR}/\${TOOL}.tsv"
+            python3 "${INSTALL_DIR}/bin/calibrate_tool_weights.py" inspect \\
+                --ground-truth "${GT_FILE}" \\
+                --results-dir  "${BY_TOOL_DIR}" \\
+                --tool         "\${TOOL}" \\
+                --genes        A,B,C,DRB1,DQB1 \\
+                --output       "\${TOOL_TSV}" >/dev/null
+
+            awk -F '\t' -v sample="${SAMPLE}" 'NR==1 || \$1==sample' "\${TOOL_TSV}" || true
+        done
+    else
+        echo "[WARN] GT file not found: ${GT_FILE}"
+        echo "[INFO] Showing raw tool outputs:"
+        for TOOL in \$(echo "${TOOLS}" | tr ',' ' '); do
+            SRC="${RESULTS_DIR}/${SAMPLE}/\${TOOL}/${SAMPLE}_\${TOOL}.txt"
+            if [[ -f "\$SRC" ]]; then
+                echo ""
+                echo "--- \${TOOL} ---"
+                cat "\$SRC"
+            else
+                echo "--- \${TOOL}: NO OUTPUT ---"
+            fi
+        done
+    fi
+} | tee "${REPORT_FILE}"
+rm -rf "\${TMP_REPORT_DIR}"
 
 echo ""
 echo "=== Summary ==="
