@@ -363,6 +363,8 @@ python3 bin/calibrate_tool_weights.py download-gt \
 If WGS is pending, pull the curated WGS list correction before rerunning extraction or typing.
 For WES and RNA, do not resubmit active jobs; inspect existing `typing_*.out/.err`,
 `collect_*.out/.err`, and Nextflow trace/report files first, then rerun only if the jobs are stalled or failed.
+For a compact non-destructive summary across all three E2E runs, use:
+`bash scripts/check_e2e_puhti_status.sh --project project_2008084`
 
 ### Common Issues
 
