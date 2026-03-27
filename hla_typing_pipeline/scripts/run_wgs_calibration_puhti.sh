@@ -423,7 +423,7 @@ EXTRACTEOF
     else
         EXTRACT_JOB=$(eval "$SBATCH_EXTRACT")
         echo "[INFO] Phase 0 extraction array submitted: ${EXTRACT_JOB}"
-        PHASE0_DEP="--dependency=afterok:${EXTRACT_JOB}"
+        PHASE0_DEP="--dependency=afterany:${EXTRACT_JOB}"  # afterany: proceed even if some tasks SKIP/fail
     fi
 else
     echo "[SKIP] Phase 0 — using existing HLA BAMs"
@@ -517,7 +517,7 @@ TYPINGEOF
     else
         TYPING_JOB=$(eval "$SBATCH_TYPING")
         echo "[INFO] Phase 1 typing job submitted: ${TYPING_JOB}"
-        PHASE1_DEP="--dependency=afterok:${TYPING_JOB}"
+        PHASE1_DEP="--dependency=afterany:${TYPING_JOB}"  # afterany: collect even if some tools failed
     fi
 else
     echo "[SKIP] Phase 1 — using existing typing results"
@@ -748,7 +748,7 @@ echo "================================================================="
 CALEOF
 
 SBATCH_CAL="sbatch --parsable \
-    --dependency=afterok:${COLLECT_JOB} \
+    --dependency=afterany:${COLLECT_JOB} \
     ${CALIBRATE_SCRIPT}"
 
 REMAINING=$(( N_PENDING - N_TOTAL ))

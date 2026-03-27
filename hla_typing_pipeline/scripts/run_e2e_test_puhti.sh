@@ -530,7 +530,7 @@ PHASE0EOF
     else
         PHASE0_JOB=$(eval "$SBATCH_P0")
         echo "[INFO] Phase 0 submitted: ${PHASE0_JOB}"
-        PHASE0_DEP="--dependency=afterok:${PHASE0_JOB}"
+        PHASE0_DEP="--dependency=afterany:${PHASE0_JOB}"  # afterany: proceed even if extraction partially fails
     fi
 
 else
@@ -620,7 +620,7 @@ TYPINGEOF
     else
         TYPING_JOB=$(eval "$SBATCH_TYPING")
         echo "[INFO] Phase 1 typing job submitted: ${TYPING_JOB}"
-        PHASE1_DEP="--dependency=afterok:${TYPING_JOB}"
+        PHASE1_DEP="--dependency=afterany:${TYPING_JOB}"  # afterany: report even if some tools failed
     fi
 else
     echo "[SKIP] Phase 1 — using existing typing results"
