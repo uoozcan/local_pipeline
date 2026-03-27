@@ -388,7 +388,7 @@ workflow {
             ch_fastqc = ch_fastqc.mix(FASTQC_BAM.out.zip.map { sample_id, zip -> zip })
         }
 
-        def needs_cram_hla_preprocess = ['spechla', 'optitype'].any { it in tools_list }
+        def needs_cram_hla_preprocess = ['spechla', 'optitype', 'hlahd', 'arcashla'].any { it in tools_list }
         def ch_cram_hla_bam = null
         def ch_cram_hla_fastq = null
         if (needs_cram_hla_preprocess) {
@@ -406,8 +406,8 @@ workflow {
             })
         }
         if ('hlahd' in tools_list) {
-            HLAHD(ch_input, params.reference, params.hla_genes)
-            ch_results = ch_results.mix(HLAHD.out.results.map { sample_id, result_file ->
+            HLAHD_FASTQ(ch_cram_hla_fastq, params.hla_genes)
+            ch_results = ch_results.mix(HLAHD_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'hlahd', result_file]
             })
         }
@@ -418,8 +418,8 @@ workflow {
             })
         }
         if ('arcashla' in tools_list) {
-            ARCASHLA(ch_input, params.reference)
-            ch_results = ch_results.mix(ARCASHLA.out.results.map { sample_id, result_file ->
+            ARCASHLA_FASTQ(ch_cram_hla_fastq)
+            ch_results = ch_results.mix(ARCASHLA_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'arcashla', result_file]
             })
         }
@@ -467,7 +467,7 @@ workflow {
             ch_fastqc = ch_fastqc.mix(FASTQC_BAM.out.zip.map { sample_id, zip -> zip })
         }
 
-        def needs_bam_hla_preprocess = ['spechla', 'optitype'].any { it in tools_list }
+        def needs_bam_hla_preprocess = ['spechla', 'optitype', 'hlahd', 'arcashla'].any { it in tools_list }
         def ch_bam_hla_bam = null
         def ch_bam_hla_fastq = null
         if (needs_bam_hla_preprocess) {
@@ -487,8 +487,8 @@ workflow {
 
         // Run HLA-HD if requested
         if ('hlahd' in tools_list) {
-            HLAHD(ch_input, params.reference, params.hla_genes)
-            ch_results = ch_results.mix(HLAHD.out.results.map { sample_id, result_file ->
+            HLAHD_FASTQ(ch_bam_hla_fastq, params.hla_genes)
+            ch_results = ch_results.mix(HLAHD_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'hlahd', result_file]
             })
         }
@@ -503,8 +503,8 @@ workflow {
 
         // Run arcasHLA if requested
         if ('arcashla' in tools_list) {
-            ARCASHLA(ch_input, params.reference)
-            ch_results = ch_results.mix(ARCASHLA.out.results.map { sample_id, result_file ->
+            ARCASHLA_FASTQ(ch_bam_hla_fastq)
+            ch_results = ch_results.mix(ARCASHLA_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'arcashla', result_file]
             })
         }
@@ -689,7 +689,7 @@ workflow {
 
             ch_ms_hla_preproc_input = ch_ms_bam_validated
                 .filter { sample_id, bam, seq_type, patient_id ->
-                    ['spechla', 'optitype'].any { it in resolveTools(seq_type, tools_list) }
+                    ['spechla', 'optitype', 'hlahd', 'arcashla'].any { it in resolveTools(seq_type, tools_list) }
                 }
                 .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] }
 
@@ -715,15 +715,18 @@ workflow {
             })
 
             // HLA-HD — WGS, WES, targeted
-            HLAHD(
-                ch_ms_bam_validated
-                    .filter { sample_id, bam, seq_type, patient_id ->
+            HLAHD_FASTQ(
+                EXTRACT_HLA_READS.out.fastq
+                    .join(ch_ms_bam_validated.map { sample_id, bam, seq_type, patient_id ->
+                        [sample_id, seq_type]
+                    })
+                    .filter { sample_id, fastq1, fastq2, seq_type ->
                         'hlahd' in resolveTools(seq_type, tools_list)
                     }
-                    .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] },
-                params.reference, params.hla_genes
+                    .map { sample_id, fastq1, fastq2, seq_type -> [sample_id, fastq1, fastq2] },
+                params.hla_genes
             )
-            ch_results = ch_results.mix(HLAHD.out.results.map { sample_id, result_file ->
+            ch_results = ch_results.mix(HLAHD_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'hlahd', result_file]
             })
 
@@ -740,16 +743,18 @@ workflow {
                 [sample_id, 'hlala', result_file]
             })
 
-            // arcasHLA (BAM mode) — WGS
-            ARCASHLA(
-                ch_ms_bam_validated
-                    .filter { sample_id, bam, seq_type, patient_id ->
+            // arcasHLA — WGS, WES, targeted via shared FASTQ preprocessing
+            ARCASHLA_FASTQ(
+                EXTRACT_HLA_READS.out.fastq
+                    .join(ch_ms_bam_validated.map { sample_id, bam, seq_type, patient_id ->
+                        [sample_id, seq_type]
+                    })
+                    .filter { sample_id, fastq1, fastq2, seq_type ->
                         'arcashla' in resolveTools(seq_type, tools_list)
                     }
-                    .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] },
-                params.reference
+                    .map { sample_id, fastq1, fastq2, seq_type -> [sample_id, fastq1, fastq2] }
             )
-            ch_results = ch_results.mix(ARCASHLA.out.results.map { sample_id, result_file ->
+            ch_results = ch_results.mix(ARCASHLA_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'arcashla', result_file]
             })
 

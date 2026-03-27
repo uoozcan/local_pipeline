@@ -14,7 +14,7 @@
 #   --project PROJECT_ID   CSC project account (default: $SLURM_JOB_ACCOUNT or project_2008084)
 #   --sample-list FILE     Sample list (default: conf/wgs_samples_50.txt)
 #   --batch-size N         Process next N unextracted samples per run (default: 10)
-#   --tools TOOLS          Comma-separated tools (default: hlahd,spechla,arcashla,optitype,xhla,kourami,polysolver)
+#   --tools TOOLS          Comma-separated tools (default: hlahd,spechla,arcashla,optitype)
 #   --genes GENES          Comma-separated genes (default: A,B,C,DRB1,DQB1)
 #   --skip-extract         Skip Phase 0 (BAMs already present)
 #   --skip-typing          Skip Phase 1 (results already present)
@@ -45,7 +45,8 @@ INSTALL_DIR="$(dirname "$SCRIPT_DIR")"   # hla_typing_pipeline/
 PROJECT_ID="${SLURM_JOB_ACCOUNT:-project_2008084}"
 # hlala excluded: needs full-genome PRG graph (not HLA-region BAM)
 # seq2hla excluded: RNA-seq optimised, unreliable on WGS
-TOOLS="hlahd,spechla,arcashla,optitype,kourami,polysolver"
+# polysolver/kourami deferred from the default stabilisation pass; add via --tools when needed
+TOOLS="hlahd,spechla,arcashla,optitype"
 GENES="A,B,C,DRB1,DQB1"
 RESOLUTION="2-field"
 SAMPLE_LIST_DEFAULT="${INSTALL_DIR}/conf/wgs_samples_50.txt"

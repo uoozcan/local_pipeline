@@ -26,10 +26,10 @@
 #   WES: NA18501  (YRI, 1KGP Phase 3 WES BAM from EBI FTP)
 #   RNA: NA18502  (YRI, Geuvadis ERP001942 paired FASTQs)
 #
-# Default tools per type (Kourami excluded — takes ~8h):
-#   WGS: hlahd,spechla,arcashla,optitype,polysolver
-#   WES: hlahd,spechla,arcashla,optitype,polysolver
-#   RNA: hlahd,spechla,arcashla,optitype,t1k,seq2hla
+# Default tools per type (focus on the currently stabilised tool paths):
+#   WGS: hlahd,spechla,arcashla,optitype
+#   WES: hlahd,spechla,arcashla,optitype
+#   RNA: arcashla,optitype,seq2hla
 #
 # Output:
 #   Phase 0 log:  ${LOGS_DIR}/test_phase0.out
@@ -90,7 +90,7 @@ fi
 case "$TYPE" in
     wgs)
         [[ -z "$SAMPLE" ]] && SAMPLE="NA19238"
-        [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype,polysolver"
+        [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype"
         SEQ_TYPE="dna"
         REFERENCE="hg38"
         HLA_REGION="chr6:28000000-34000000"
@@ -102,7 +102,7 @@ case "$TYPE" in
         ;;
     wes)
         [[ -z "$SAMPLE" ]] && SAMPLE="NA18501"
-        [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype,polysolver"
+        [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype"
         SEQ_TYPE="wes"
         REFERENCE="hg19"
         HLA_REGION="6:28000000-34000000"   # ENSEMBL naming (no chr prefix)
@@ -112,7 +112,7 @@ case "$TYPE" in
         ;;
     rna)
         [[ -z "$SAMPLE" ]] && SAMPLE="NA18502"
-        [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype,t1k,seq2hla"
+        [[ -z "$TOOLS"  ]] && TOOLS="arcashla,optitype,seq2hla"
         SEQ_TYPE="rna"
         REFERENCE="hg38"
         INPUT_MODE="fastq"
