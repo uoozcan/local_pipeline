@@ -1,6 +1,8 @@
-# 50 1KGP NYGC 30x WGS samples for WGS HLA calibration
+# 50 curated 1KGP NYGC 30x WGS samples for HLA calibration
 # Balanced across 5 populations (10 each)
-# All confirmed in Gourraud 2014 GT AND present in PRJEB31736 (NYGC 30x CRAMs)
+# Curated against the GT TSV produced by:
+#   python3 bin/calibrate_tool_weights.py download-gt
+# and ENA PRJEB31736 metadata (NYGC 30x CRAM availability)
 # CRAMs at ENA: ftp.sra.ebi.ac.uk/vol1/run/{ERR6}/{ERR}/{SAMPLE}.final.cram
 # (ERR accessions fetched from ENA: PRJEB31736)
 #
@@ -17,13 +19,14 @@ NA19131
 NA19152
 NA19153
 #
-# EAS/CHB (Gourraud 2014 confirmed, PRJEB31736 confirmed)
-# NA18524, NA18529 not in PRJEB31736 — replaced with NA18504, NA18520
-# NA18519 not in PRJEB31736 — replaced with NA18520
+# EAS/CHB (curated against GT TSV + PRJEB31736 metadata)
+# NA18519, NA18524, NA18529 not in PRJEB31736
+# NA18520 is YRI in the 1KGP panel, so it is excluded from the CHB block
+# Replacements: NA18504, NA18530
 NA18526
 NA18542
 NA18504
-NA18520
+NA18530
 NA18532
 NA18537
 NA18561
@@ -43,7 +46,7 @@ HG00105
 HG00106
 HG00107
 #
-# EUR/TSI (Gourraud 2014 confirmed, PRJEB31736 confirmed)
+# EUR/TSI (curated against GT TSV + PRJEB31736 metadata)
 # NA20503, NA20507, NA20511 not in PRJEB31736 — replaced with NA20519, NA20521, NA20528
 # NA20517 has corrupted CRAM on EBI — replaced with NA20519
 NA20502
@@ -57,7 +60,7 @@ NA20509
 NA20510
 NA20528
 #
-# EUR/CEU (Gourraud 2014 confirmed, PRJEB31736 confirmed)
+# EUR/CEU (curated against GT TSV + PRJEB31736 metadata)
 # NA12891, NA12892 not in PRJEB31736 — replaced with NA10847, NA10851
 # NA06984, NA06989 not in PRJEB31736 — replaced with NA12044, NA12154
 NA10847
