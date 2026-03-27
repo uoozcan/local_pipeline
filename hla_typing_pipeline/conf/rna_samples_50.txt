@@ -1,11 +1,12 @@
-# 50 Geuvadis ERP001942 samples for RNA-seq HLA calibration
+# 50 curated Geuvadis ERP001942 samples for RNA-seq HLA calibration
 # Balanced across 5 populations (10 each)
-# All confirmed in Gourraud 2014 GT AND present in Geuvadis ERP001942 RNA-seq
+# Curated against the GT TSV produced by:
+#   python3 bin/calibrate_tool_weights.py download-gt
+# and Geuvadis ERP001942 ENA metadata
 # FASTQs at ENA: ftp.sra.ebi.ac.uk/vol1/fastq/ERR{xxx}/{ERR}{_1,_2}.fastq.gz
 #
-# NOTE: Verify/update with on-Puhti intersection before first run:
-#   python3 scripts/gen_rna_sample_list.py  (if available)
-#   OR: the run script auto-filters against GT and ENA metadata at runtime
+# NOTE: Keep this list GT-backed and source-backed.
+# Any sample dropped by the runtime GT filter should be treated as a list bug to fix in git.
 #
 # AFR/YRI (Gourraud 2014 confirmed, present in Geuvadis ERP001942)
 # NA18xxx YRI samples are 1KGP-only; Geuvadis uses NA19xxx YRI IDs

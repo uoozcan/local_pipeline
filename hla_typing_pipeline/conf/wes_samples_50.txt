@@ -1,6 +1,8 @@
-# 50 1000 Genomes samples for WES HLA calibration
+# 50 curated 1000 Genomes samples for WES HLA calibration
 # Balanced across 5 populations (10 each)
-# All confirmed in Gourraud 2014 GT AND present in 1KGP Phase 3 WES panel
+# Curated against the GT TSV produced by:
+#   python3 bin/calibrate_tool_weights.py download-gt
+# and 1KGP Phase 3 WES source metadata
 # WES BAMs at EBI: ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data/{SAMPLE}/exome_alignment/
 #
 # AFR/YRI
