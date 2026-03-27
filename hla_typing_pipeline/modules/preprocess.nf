@@ -55,12 +55,14 @@ process EXTRACT_HLA_READS {
     tag "$sample_id"
     label 'process_medium'
     publishDir "${params.outdir}/${sample_id}/preprocessing", mode: 'copy', pattern: "*.log"
+    publishDir "${params.outdir}/${sample_id}/preprocessing", mode: 'copy', pattern: "*_hla_extract.bam*"
 
     input:
     tuple val(sample_id), path(bam)
     val reference
 
     output:
+    tuple val(sample_id), path("${sample_id}_hla_extract.bam"), emit: hla_bam
     tuple val(sample_id), path("${sample_id}_hla_R1.fastq.gz"), path("${sample_id}_hla_R2.fastq.gz"), emit: fastq
     tuple val(sample_id), path("${sample_id}_extraction.log"), emit: log
     path "versions.yml", emit: versions
@@ -102,15 +104,16 @@ process EXTRACT_HLA_READS {
 
     # Step 1: Extract HLA reads
     echo "Extracting HLA reads from \$HLA_REGION..." | tee -a ${sample_id}_extraction.log
-    samtools view -@ ${task.cpus} -b ${bam} \$HLA_REGION > hla_extract.bam
+    samtools view -@ ${task.cpus} -b ${bam} \$HLA_REGION > ${sample_id}_hla_extract.bam
+    samtools index ${sample_id}_hla_extract.bam
 
     # Count extracted reads
-    HLA_READS=\$(samtools view -c hla_extract.bam)
+    HLA_READS=\$(samtools view -c ${sample_id}_hla_extract.bam)
     echo "Extracted HLA reads: \$HLA_READS" >> ${sample_id}_extraction.log
 
     # Step 2: Name sort
     echo "Name sorting..." | tee -a ${sample_id}_extraction.log
-    samtools sort -n -@ ${task.cpus} -m 2G hla_extract.bam -o namesort.bam
+    samtools sort -n -@ ${task.cpus} -m 2G ${sample_id}_hla_extract.bam -o namesort.bam
 
     # Step 3: Convert to FASTQ
     echo "Converting to FASTQ..." | tee -a ${sample_id}_extraction.log
@@ -127,7 +130,7 @@ process EXTRACT_HLA_READS {
     echo "Output R2 reads: \$R1_READS" >> ${sample_id}_extraction.log
 
     # Cleanup
-    rm -f hla_extract.bam namesort.bam
+    rm -f namesort.bam
 
     echo "Extraction complete." >> ${sample_id}_extraction.log
 

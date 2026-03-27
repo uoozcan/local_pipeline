@@ -53,8 +53,8 @@ include { HLA_LOH; HLA_LOH_VISUALIZE; HLA_LOH_SUMMARY } from './modules/loh'
 // Import multi-source module
 include { MULTISOURCE_CONSENSUS } from './modules/multisource'
 
-// Import CRAM-to-BAM conversion
-include { CRAM_TO_BAM } from './modules/preprocess'
+// Import shared preprocessing
+include { CRAM_TO_BAM; EXTRACT_HLA_READS } from './modules/preprocess'
 
 // Help message
 def helpMessage() {
@@ -388,9 +388,19 @@ workflow {
             ch_fastqc = ch_fastqc.mix(FASTQC_BAM.out.zip.map { sample_id, zip -> zip })
         }
 
+        def needs_cram_hla_preprocess = ['spechla', 'optitype'].any { it in tools_list }
+        def ch_cram_hla_bam = null
+        def ch_cram_hla_fastq = null
+        if (needs_cram_hla_preprocess) {
+            EXTRACT_HLA_READS(ch_input, params.reference)
+            ch_cram_hla_bam = EXTRACT_HLA_READS.out.hla_bam
+            ch_cram_hla_fastq = EXTRACT_HLA_READS.out.fastq
+            ch_qc_reports = ch_qc_reports.mix(EXTRACT_HLA_READS.out.log.map { it })
+        }
+
         // Run the same BAM tools as in the BAM workflow
         if ('spechla' in tools_list) {
-            SPECHLA(ch_input, params.reference)
+            SPECHLA(ch_cram_hla_bam, params.reference)
             ch_results = ch_results.mix(SPECHLA.out.results.map { sample_id, result_file ->
                 [sample_id, 'spechla', result_file]
             })
@@ -414,8 +424,9 @@ workflow {
             })
         }
         if ('optitype' in tools_list) {
-            OPTITYPE(ch_input, params.reference)
-            ch_results = ch_results.mix(OPTITYPE.out.results.map { sample_id, result_file ->
+            def seq_type = params.seq_type ?: 'dna'
+            OPTITYPE_FASTQ(ch_cram_hla_fastq, seq_type)
+            ch_results = ch_results.mix(OPTITYPE_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'optitype', result_file]
             })
         }
@@ -456,9 +467,19 @@ workflow {
             ch_fastqc = ch_fastqc.mix(FASTQC_BAM.out.zip.map { sample_id, zip -> zip })
         }
 
+        def needs_bam_hla_preprocess = ['spechla', 'optitype'].any { it in tools_list }
+        def ch_bam_hla_bam = null
+        def ch_bam_hla_fastq = null
+        if (needs_bam_hla_preprocess) {
+            EXTRACT_HLA_READS(ch_input, params.reference)
+            ch_bam_hla_bam = EXTRACT_HLA_READS.out.hla_bam
+            ch_bam_hla_fastq = EXTRACT_HLA_READS.out.fastq
+            ch_qc_reports = ch_qc_reports.mix(EXTRACT_HLA_READS.out.log.map { it })
+        }
+
         // Run SpecHLA if requested
         if ('spechla' in tools_list) {
-            SPECHLA(ch_input, params.reference)
+            SPECHLA(ch_bam_hla_bam, params.reference)
             ch_results = ch_results.mix(SPECHLA.out.results.map { sample_id, result_file ->
                 [sample_id, 'spechla', result_file]
             })
@@ -490,8 +511,9 @@ workflow {
 
         // Run OptiType if requested
         if ('optitype' in tools_list) {
-            OPTITYPE(ch_input)
-            ch_results = ch_results.mix(OPTITYPE.out.results.map { sample_id, result_file ->
+            def seq_type = params.seq_type ?: 'dna'
+            OPTITYPE_FASTQ(ch_bam_hla_fastq, seq_type)
+            ch_results = ch_results.mix(OPTITYPE_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'optitype', result_file]
             })
         }
@@ -665,13 +687,27 @@ workflow {
                 BAMQC(ch_ms_bam.map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] })
             }
 
+            ch_ms_hla_preproc_input = ch_ms_bam_validated
+                .filter { sample_id, bam, seq_type, patient_id ->
+                    ['spechla', 'optitype'].any { it in resolveTools(seq_type, tools_list) }
+                }
+                .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] }
+
+            if (ch_ms_hla_preproc_input) {
+                EXTRACT_HLA_READS(ch_ms_hla_preproc_input, params.reference)
+                ch_qc_reports = ch_qc_reports.mix(EXTRACT_HLA_READS.out.log.map { it })
+            }
+
             // SpecHLA — WGS, WES
             SPECHLA(
-                ch_ms_bam_validated
-                    .filter { sample_id, bam, seq_type, patient_id ->
+                EXTRACT_HLA_READS.out.hla_bam
+                    .join(ch_ms_bam_validated.map { sample_id, bam, seq_type, patient_id ->
+                        [sample_id, seq_type]
+                    })
+                    .filter { sample_id, hla_bam, seq_type ->
                         'spechla' in resolveTools(seq_type, tools_list)
                     }
-                    .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] },
+                    .map { sample_id, hla_bam, seq_type -> [sample_id, hla_bam] },
                 params.reference
             )
             ch_results = ch_results.mix(SPECHLA.out.results.map { sample_id, result_file ->
@@ -717,15 +753,22 @@ workflow {
                 [sample_id, 'arcashla', result_file]
             })
 
-            // OptiType (BAM mode) — WGS, WES, targeted
-            OPTITYPE(
-                ch_ms_bam_validated
-                    .filter { sample_id, bam, seq_type, patient_id ->
+            // OptiType (shared preprocessing FASTQ mode) — WGS, WES, targeted
+            OPTITYPE_FASTQ(
+                EXTRACT_HLA_READS.out.fastq
+                    .join(ch_ms_bam_validated.map { sample_id, bam, seq_type, patient_id ->
+                        [sample_id, seq_type]
+                    })
+                    .filter { sample_id, fastq1, fastq2, seq_type ->
                         'optitype' in resolveTools(seq_type, tools_list)
                     }
-                    .map { sample_id, bam, seq_type, patient_id -> [sample_id, bam] }
+                    .map { sample_id, fastq1, fastq2, seq_type -> [sample_id, fastq1, fastq2] },
+                ch_ms_bam_validated
+                    .map { sample_id, bam, seq_type, patient_id -> [sample_id, seq_type] }
+                    .join(EXTRACT_HLA_READS.out.fastq.map { sample_id, fastq1, fastq2 -> [sample_id, true] })
+                    .map { sample_id, seq_type, _present -> seq_type }
             )
-            ch_results = ch_results.mix(OPTITYPE.out.results.map { sample_id, result_file ->
+            ch_results = ch_results.mix(OPTITYPE_FASTQ.out.results.map { sample_id, result_file ->
                 [sample_id, 'optitype', result_file]
             })
 

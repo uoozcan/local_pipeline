@@ -13,7 +13,7 @@ process SPECHLA {
     publishDir "${params.outdir}/${sample_id}/spechla", mode: 'copy'
 
     input:
-    tuple val(sample_id), path(bam)
+    tuple val(sample_id), path(hla_bam)
     val reference
 
     output:
@@ -47,37 +47,14 @@ process SPECHLA {
     mkdir -p ${sample_id}
 
     # Check for BAM index, create if missing
-    if [ ! -f "${bam}.bai" ] && [ ! -f "${bam.baseName}.bai" ]; then
-        echo "Creating BAM index..."
-        samtools index ${bam}
+    if [ ! -f "${hla_bam}.bai" ] && [ ! -f "${hla_bam.baseName}.bai" ]; then
+        echo "Creating HLA BAM index..."
+        samtools index ${hla_bam}
     fi
 
-    # Determine chromosome naming convention
-    CHR_PREFIX=\$(samtools view -H ${bam} | grep -m1 "^@SQ" | grep -o "SN:[^	]*" | cut -d: -f2 | grep -o "^chr" || echo "")
-
-    # Define HLA region based on reference
-    if [ "${ref}" == "hg38" ]; then
-        if [ -n "\$CHR_PREFIX" ]; then
-            HLA_REGION="chr6:28510120-33480577"
-        else
-            HLA_REGION="6:28510120-33480577"
-        fi
-    else
-        if [ -n "\$CHR_PREFIX" ]; then
-            HLA_REGION="chr6:28477797-33448354"
-        else
-            HLA_REGION="6:28477797-33448354"
-        fi
-    fi
-
-    # Step 1: Extract HLA reads
-    echo "[Step 1] Extracting HLA reads from \$HLA_REGION..."
-    samtools view -b ${bam} \$HLA_REGION > ${sample_id}/hla_extract.bam
-    samtools index ${sample_id}/hla_extract.bam
-
-    # Step 2: Convert to FASTQ
-    echo "[Step 2] Converting to FASTQ..."
-    samtools sort -n ${sample_id}/hla_extract.bam -o ${sample_id}/namesort.bam
+    # Step 1: Convert pre-extracted HLA BAM to FASTQ for the local SpecHLA install
+    echo "[Step 1] Preparing FASTQs from pipeline-generated HLA BAM..."
+    samtools sort -n ${hla_bam} -o ${sample_id}/namesort.bam
     # samtools 1.3.1 doesn't auto-compress, output to uncompressed then gzip
     samtools fastq \
         -1 ${sample_id}/R1.fastq \
@@ -87,8 +64,8 @@ process SPECHLA {
     gzip ${sample_id}/R1.fastq
     gzip ${sample_id}/R2.fastq
 
-    # Step 3: Run SpecHLA
-    echo "[Step 3] Running SpecHLA..."
+    # Step 2: Run SpecHLA
+    echo "[Step 2] Running SpecHLA from pipeline-generated HLA BAM..."
     cd ${sample_id}
     bash \${SPECHLA_PATH}/script/whole/SpecHLA.sh \
         -n ${sample_id} \
@@ -96,11 +73,11 @@ process SPECHLA {
         -2 R2.fastq.gz \
         -o . \
         -j ${task.cpus} \
-        -u 1
+        -u ${ref == 'hg19' ? 0 : 1}
     cd ..
 
-    # Step 4: Parse results
-    echo "[Step 4] Parsing results..."
+    # Step 3: Parse results
+    echo "[Step 3] Parsing results..."
     if [ -f "${sample_id}/hla.result.txt" ]; then
         cp ${sample_id}/hla.result.txt ${sample_id}_spechla.txt
     elif [ -f "${sample_id}/${sample_id}/hla.result.txt" ]; then
@@ -111,7 +88,7 @@ process SPECHLA {
     fi
 
     # Cleanup intermediate files
-    rm -f ${sample_id}/hla_extract.bam* ${sample_id}/namesort.bam
+    rm -f ${sample_id}/namesort.bam
 
     # Version info
     cat <<-END_VERSIONS > versions.yml
