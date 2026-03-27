@@ -124,6 +124,6 @@ summarize_type() {
     fi
 }
 
-summarize_type "wgs" "NA19238" hlahd spechla arcashla optitype polysolver
-summarize_type "wes" "NA18501" hlahd spechla arcashla optitype polysolver
-summarize_type "rna" "NA18502" hlahd spechla arcashla optitype t1k seq2hla
+summarize_type "wgs" "NA19238" hlahd spechla arcashla optitype
+summarize_type "wes" "NA18501" hlahd spechla arcashla optitype
+summarize_type "rna" "NA18502" arcashla optitype seq2hla
