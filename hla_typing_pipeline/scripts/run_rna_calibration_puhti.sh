@@ -327,7 +327,7 @@ PYEOF
 fi
 
 #-----------------------------------------------------------------------------
-# Phase 0: SLURM array — download paired FASTQs from ENA FTP
+# Phase 0: SLURM array — download paired FASTQs from ENA HTTPS endpoints
 #-----------------------------------------------------------------------------
 PHASE0_DEP=""
 
@@ -383,8 +383,8 @@ mkdir -p "${FASTQ_DIR}"
 download_file() {
     local URL="$1"
     local OUT="$2"
-    # ENA FTP paths don't include ftp:// prefix; prepend it
-    local FULL_URL="ftp://${URL}"
+    # ENA fastq_ftp paths do not include a scheme; use HTTPS for better portability
+    local FULL_URL="https://${URL}"
     echo "[INFO] Downloading: ${FULL_URL}"
     wget -q --tries=3 --timeout=120 -O "${OUT}.tmp" "${FULL_URL}" && mv "${OUT}.tmp" "${OUT}"
 }
@@ -441,7 +441,7 @@ DLEOF
     else
         DOWNLOAD_JOB=$(eval "$SBATCH_DOWNLOAD")
         echo "[INFO] Phase 0 download array submitted: ${DOWNLOAD_JOB}"
-        PHASE0_DEP="--dependency=afterok:${DOWNLOAD_JOB}"
+        PHASE0_DEP="--dependency=afterany:${DOWNLOAD_JOB}"  # afterany: proceed with whatever FASTQs were downloaded
     fi
 else
     echo "[SKIP] Phase 0 — using existing FASTQs"
@@ -535,7 +535,7 @@ TYPINGEOF
     else
         TYPING_JOB=$(eval "$SBATCH_TYPING")
         echo "[INFO] Phase 1 typing job submitted: ${TYPING_JOB}"
-        PHASE1_DEP="--dependency=afterok:${TYPING_JOB}"
+        PHASE1_DEP="--dependency=afterany:${TYPING_JOB}"  # afterany: collect partial results even if some tools fail
     fi
 else
     echo "[SKIP] Phase 1 — using existing typing results"

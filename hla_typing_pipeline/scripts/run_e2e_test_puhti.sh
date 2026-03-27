@@ -53,6 +53,7 @@ TYPE=""
 PROJECT_ID="${SLURM_JOB_ACCOUNT:-project_2008084}"
 SAMPLE=""
 TOOLS=""
+REFERENCE=""
 SKIP_DOWNLOAD=false
 SKIP_TYPING=false
 STATUS_ONLY=false
@@ -91,6 +92,7 @@ case "$TYPE" in
         [[ -z "$SAMPLE" ]] && SAMPLE="NA19238"
         [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype,polysolver"
         SEQ_TYPE="dna"
+        REFERENCE="hg38"
         HLA_REGION="chr6:28000000-34000000"
         INPUT_MODE="bam"   # extract CRAM → BAM, feed BAM to Nextflow
         ENA_PROJECT="PRJEB31736"
@@ -102,6 +104,7 @@ case "$TYPE" in
         [[ -z "$SAMPLE" ]] && SAMPLE="NA18501"
         [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype,polysolver"
         SEQ_TYPE="wes"
+        REFERENCE="hg19"
         HLA_REGION="6:28000000-34000000"   # ENSEMBL naming (no chr prefix)
         INPUT_MODE="bam"
         PHASE0_TIME="02:00:00"
@@ -111,6 +114,7 @@ case "$TYPE" in
         [[ -z "$SAMPLE" ]] && SAMPLE="NA18502"
         [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype,t1k,seq2hla"
         SEQ_TYPE="rna"
+        REFERENCE="hg38"
         INPUT_MODE="fastq"
         ENA_PROJECT="ERP001942"
         ENA_META_URL="https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${ENA_PROJECT}&result=read_run&fields=sample_alias,sample_accession,run_accession,fastq_ftp&format=tsv"
@@ -261,7 +265,7 @@ PYEOF
         elif [[ "$TYPE" == "wes" ]]; then
             echo "[INFO] Building WES BAM URL map for ${SAMPLE}..."
             # Download population panel for URL construction
-            PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20130502.ALL.panel"
+            PANEL_URL="https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20130502.ALL.panel"
             PANEL_FILE="${INDEX_DIR}/1kgp_panel.tsv"
             if [[ ! -f "${PANEL_FILE}" ]]; then
                 wget -q -O "${PANEL_FILE}" "${PANEL_URL}" \
@@ -272,7 +276,7 @@ import sys
 panel_file  = "${PANEL_FILE}"
 url_map_out = "${URL_MAP}"
 sample      = "${SAMPLE}"
-ftp_base    = "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data"
+ftp_base    = "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data"
 DATES       = ["20121211", "20130415", "20120522"]
 pop_map = {}
 with open(panel_file) as fh:
@@ -500,7 +504,7 @@ mkdir -p "\${FASTQ_DIR}"
 
 download_file() {
     local URL="\$1" OUT="\$2"
-    wget -q --tries=3 --timeout=120 -O "\${OUT}.tmp" "ftp://\${URL}" && mv "\${OUT}.tmp" "\${OUT}"
+    wget -q --tries=3 --timeout=120 -O "\${OUT}.tmp" "https://\${URL}" && mv "\${OUT}.tmp" "\${OUT}"
 }
 
 R1_OK=false
@@ -596,7 +600,7 @@ echo "[OK] Samplesheet: ${SAMPLESHEET}"
 nextflow run main.nf \\
     --input_samplesheet "${SAMPLESHEET}" \\
     --seq_type ${SEQ_TYPE} \\
-    --reference hg38 \\
+    --reference ${REFERENCE} \\
     --tools "${TOOLS}" \\
     --weighting equal \\
     --skip_qc true \\

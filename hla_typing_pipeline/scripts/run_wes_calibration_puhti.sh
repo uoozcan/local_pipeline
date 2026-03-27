@@ -3,7 +3,7 @@
 # run_wes_calibration_puhti.sh
 # WES HLA calibration on CSC Puhti — 1000 Genomes Phase 3 exome BAMs
 #
-# Uses 1KGP Phase 3 WES BAMs (hg19/GRCh37) from EBI FTP.
+# Uses 1KGP Phase 3 WES BAMs (hg19/GRCh37) from EBI HTTPS endpoints.
 # Ground truth: Gourraud et al. 2014 (same as WGS calibration).
 # Produces: conf/tool_weights_wes_v1.json, conf/tool_accuracy_wes_v1.tsv
 #
@@ -14,7 +14,7 @@
 #   --project PROJECT_ID   CSC project account (default: $SLURM_JOB_ACCOUNT or project_2008084)
 #   --sample-list FILE     Sample list (default: conf/wes_samples_50.txt)
 #   --batch-size N         Process next N unextracted samples per run (default: 10)
-#   --tools TOOLS          Comma-separated tools (default: hlahd,spechla,arcashla,optitype)
+#   --tools TOOLS          Comma-separated tools (default: hlahd,spechla,arcashla,optitype,polysolver)
 #   --genes GENES          Comma-separated genes (default: A,B,C,DRB1,DQB1)
 #   --skip-extract         Skip Phase 0 (FASTQs already present)
 #   --skip-typing          Skip Phase 1 (results already present)
@@ -43,7 +43,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(dirname "$SCRIPT_DIR")"   # hla_typing_pipeline/
 
 PROJECT_ID="${SLURM_JOB_ACCOUNT:-project_2008084}"
-TOOLS="hlahd,spechla,arcashla,optitype,seq2hla,kourami,polysolver"
+TOOLS="hlahd,spechla,arcashla,optitype,polysolver"
 GENES="A,B,C,DRB1,DQB1"
 RESOLUTION="2-field"
 SAMPLE_LIST_DEFAULT="${INSTALL_DIR}/conf/wes_samples_50.txt"
@@ -56,8 +56,8 @@ STATUS_ONLY=false
 DRY_RUN=false
 KEEP_INPUTS=false   # set true to retain HLA BAMs after Phase 1b
 
-# EBI FTP paths
-EBI_EXOME_INDEX="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/20130502.phase3.exome.sequence.index"
+# EBI HTTPS paths
+EBI_EXOME_INDEX="https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/20130502.phase3.exome.sequence.index"
 HLA_REGION="6:28000000-34000000"   # hg19/GRCh37 ENSEMBL (no chr prefix)
 
 #-----------------------------------------------------------------------------
@@ -226,18 +226,18 @@ echo "==================================================================="
 echo ""
 
 #-----------------------------------------------------------------------------
-# Build per-sample BAM URL map: SAMPLE -> full BAM FTP URL
+# Build per-sample BAM URL map: SAMPLE -> full BAM HTTPS URL
 #
 # Root cause of earlier failure: 20130502.phase3.exome.sequence.index lists
 # raw FASTQ files, not BAM alignments. BAM URLs must be constructed from the
 # 1KGP population panel which maps sample_id -> population code (e.g. YRI).
 #
 # BAM URL pattern:
-#   ftp://.../phase3/data/{SAMPLE}/exome_alignment/
+#   https://.../phase3/data/{SAMPLE}/exome_alignment/
 #     {SAMPLE}.mapped.ILLUMINA.bwa.{POP}.exome.{DATE}.bam
 # Dates tried in order: 20121211, 20130415, 20120522
 #-----------------------------------------------------------------------------
-PANEL_URL="ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20130502.ALL.panel"
+PANEL_URL="https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/integrated_call_samples_v3.20130502.ALL.panel"
 PANEL_FILE="${INDEX_DIR}/1kgp_panel.tsv"
 URL_MAP="${INDEX_DIR}/sample_bam_urls.tsv"
 
@@ -274,7 +274,7 @@ import sys, os
 panel_file  = "${PANEL_FILE}"
 sample_list = "${ALL_SAMPLES_LIST}"
 url_map_out = "${URL_MAP}"
-ftp_base    = "ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data"
+ftp_base    = "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/data"
 # Dates to try in order (most samples use 20121211)
 DATES = ["20121211", "20130415", "20120522"]
 
@@ -422,7 +422,7 @@ EXTRACTEOF
     else
         EXTRACT_JOB=$(eval "$SBATCH_EXTRACT")
         echo "[INFO] Phase 0 extraction array submitted: ${EXTRACT_JOB}"
-        PHASE0_DEP="--dependency=afterok:${EXTRACT_JOB}"
+        PHASE0_DEP="--dependency=afterany:${EXTRACT_JOB}"  # afterany: proceed with whatever BAMs were extracted
     fi
 else
     echo "[SKIP] Phase 0 — using existing HLA BAMs"
@@ -516,7 +516,7 @@ TYPINGEOF
     else
         TYPING_JOB=$(eval "$SBATCH_TYPING")
         echo "[INFO] Phase 1 typing job submitted: ${TYPING_JOB}"
-        PHASE1_DEP="--dependency=afterok:${TYPING_JOB}"
+        PHASE1_DEP="--dependency=afterany:${TYPING_JOB}"  # afterany: collect partial results even if some tools fail
     fi
 else
     echo "[SKIP] Phase 1 — using existing typing results"
