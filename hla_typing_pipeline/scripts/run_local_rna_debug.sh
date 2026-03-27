@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_DIR="$(dirname "$SCRIPT_DIR")"
-TOOLS="arcashla,optitype,t1k,seq2hla"
+TOOLS="arcashla,optitype,seq2hla"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 
 FASTQ1="${1:-}"
@@ -16,6 +16,7 @@ WORKDIR="${PIPELINE_DIR}/work_${RUN_NAME}"
 USER_CONFIG="${PIPELINE_DIR}/conf/user.config"
 DEBUG_CONFIG="${PIPELINE_DIR}/conf/local_debug_rna.config"
 RUN_CONFIG="${PIPELINE_DIR}/run.config"
+export NXF_OFFLINE="${NXF_OFFLINE:-true}"
 
 require_file() {
     local path="$1"
@@ -50,7 +51,6 @@ command -v singularity >/dev/null || { echo "ERROR: singularity not found in PAT
 
 require_file "/home/umut/projects/project_2008084/ozcanumu/hla_rnaseq_analysis/hla_references/containers/arcashla.sif"
 require_file "/home/umut/projects/project_2008084/ozcanumu/hla_rnaseq_analysis/hla_references/containers/optitype.sif"
-require_file "/home/umut/projects/project_2008084/ozcanumu/hla_rnaseq_analysis/hla_references/containers/t1k.sif"
 require_file "/home/umut/projects/project_2008084/ozcanumu/hla_rnaseq_analysis/hla_references/containers/seq2hla.sif"
 
 mkdir -p "$OUTDIR"
@@ -64,6 +64,7 @@ echo "Run name  : $RUN_NAME"
 echo "Output    : $OUTDIR"
 echo "Work dir  : $WORKDIR"
 echo "Tools     : $TOOLS"
+echo "Offline   : $NXF_OFFLINE"
 echo "Configs   : conf/user.config + run.config + conf/local_debug_rna.config"
 echo "==================================================================="
 
@@ -88,7 +89,7 @@ echo "==================================================================="
 echo " Run Summary"
 echo "==================================================================="
 echo "Nextflow exit code: $nf_exit"
-for tool in arcashla optitype t1k seq2hla; do
+for tool in arcashla optitype seq2hla; do
     result_file="$(find "$OUTDIR" -path "*/${tool}/*_${tool}.txt" -type f | head -n 1 || true)"
     if [[ -n "$result_file" ]]; then
         echo "[OK] ${tool}: ${result_file}"
@@ -101,7 +102,7 @@ TRACE_FILE="$(find "$OUTDIR/pipeline_info" -maxdepth 1 -name 'trace_*.txt' -type
 if [[ -n "$TRACE_FILE" ]]; then
     echo
     echo "Latest trace: $TRACE_FILE"
-    awk -F'\t' 'NR==1 || $4 ~ /ARCASHLA_FASTQ|OPTITYPE_FASTQ|T1K_FASTQ|SEQ2HLA/' "$TRACE_FILE"
+    awk -F'\t' 'NR==1 || $4 ~ /ARCASHLA_FASTQ|OPTITYPE_FASTQ|SEQ2HLA/' "$TRACE_FILE"
 fi
 
 exit "$nf_exit"

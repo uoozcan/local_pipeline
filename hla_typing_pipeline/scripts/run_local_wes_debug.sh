@@ -16,6 +16,7 @@ USER_CONFIG="${PIPELINE_DIR}/conf/user.config"
 DEBUG_CONFIG="${PIPELINE_DIR}/conf/local_debug_wes.config"
 RUN_CONFIG="${PIPELINE_DIR}/run.config"
 INPUT_BAI=""
+export NXF_OFFLINE="${NXF_OFFLINE:-true}"
 
 require_file() {
     local path="$1"
@@ -90,6 +91,7 @@ echo "Run name  : $RUN_NAME"
 echo "Output    : $OUTDIR"
 echo "Work dir  : $WORKDIR"
 echo "Tools     : $TOOLS"
+echo "Offline   : $NXF_OFFLINE"
 echo "Configs   : conf/user.config + run.config + conf/local_debug_wes.config"
 echo "==================================================================="
 
