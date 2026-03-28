@@ -14,7 +14,7 @@
 #   --type   TYPE    Analysis type: wgs, wes, or rna  (REQUIRED)
 #   --project ID     CSC project account (default: project_2008084)
 #   --sample SAMPLE  1KGP sample ID to test (defaults per type below)
-#   --tools  TOOLS   Comma-separated tools (default: type-specific, no kourami)
+#   --tools  TOOLS   Comma-separated tools (default: type-specific)
 #   --skip-download  Skip Phase 0 (input data already on scratch)
 #   --skip-typing    Skip Phase 1 (Nextflow already ran)
 #   --status         Show job/output status and exit
@@ -26,10 +26,10 @@
 #   WES: NA18501  (YRI, 1KGP Phase 3 WES BAM from EBI FTP)
 #   RNA: NA18502  (YRI, Geuvadis ERP001942 paired FASTQs)
 #
-# Default tools per type (focus on the currently stabilised tool paths):
-#   WGS: hlahd,spechla,arcashla,optitype
-#   WES: hlahd,spechla,arcashla,optitype
-#   RNA: arcashla,optitype,seq2hla
+# Default tools per type:
+#   WGS: spechla,hlahd,arcashla,optitype,polysolver,kourami,t1k
+#   WES: spechla,hlahd,optitype,polysolver,kourami,t1k,arcashla
+#   RNA: arcashla,optitype,seq2hla,t1k,spechla,hlahd
 #
 # Output:
 #   Phase 0 log:  ${LOGS_DIR}/test_phase0.out
@@ -90,7 +90,7 @@ fi
 case "$TYPE" in
     wgs)
         [[ -z "$SAMPLE" ]] && SAMPLE="NA19238"
-        [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype"
+        [[ -z "$TOOLS"  ]] && TOOLS="spechla,hlahd,arcashla,optitype,polysolver,kourami,t1k"
         SEQ_TYPE="dna"
         REFERENCE="hg38"
         HLA_REGION="chr6:28000000-34000000"
@@ -102,7 +102,7 @@ case "$TYPE" in
         ;;
     wes)
         [[ -z "$SAMPLE" ]] && SAMPLE="NA18501"
-        [[ -z "$TOOLS"  ]] && TOOLS="hlahd,spechla,arcashla,optitype"
+        [[ -z "$TOOLS"  ]] && TOOLS="spechla,hlahd,optitype,polysolver,kourami,t1k,arcashla"
         SEQ_TYPE="wes"
         REFERENCE="hg19"
         HLA_REGION="6:28000000-34000000"   # ENSEMBL naming (no chr prefix)
@@ -112,7 +112,7 @@ case "$TYPE" in
         ;;
     rna)
         [[ -z "$SAMPLE" ]] && SAMPLE="NA18502"
-        [[ -z "$TOOLS"  ]] && TOOLS="arcashla,optitype,seq2hla"
+        [[ -z "$TOOLS"  ]] && TOOLS="arcashla,optitype,seq2hla,t1k,spechla,hlahd"
         SEQ_TYPE="rna"
         REFERENCE="hg38"
         INPUT_MODE="fastq"

@@ -58,7 +58,7 @@ INSTALL_DIR=""
 FASTQ_DIR=""
 N_SAMPLES=50
 BATCH_SIZE=5            # samples per run (set lower to save scratch space)
-TOOLS="hlahd,spechla,arcashla,optitype"
+TOOLS="spechla,hlahd,arcashla,optitype,polysolver,kourami,t1k"
 GENES="A,B,C,DRB1,DQB1"
 REFERENCE="hg38"
 RESOLUTION="2-field"
@@ -88,7 +88,7 @@ Options:
   --batch-size N        Samples to process per run (default: 5, saves scratch space)
                         Run script 10 times to process all 50 samples.
                         Each batch uses ~15-30 GB scratch; work dirs cleaned after.
-  --tools TOOLS         Comma-separated tools (default: hlahd,spechla,arcashla,optitype)
+  --tools TOOLS         Comma-separated tools (default: spechla,hlahd,arcashla,optitype,polysolver,kourami,t1k)
   --genes GENES         Genes for calibration (default: A,B,C,DRB1,DQB1)
   --gt-file PATH        Use this CSV as ground truth (overrides downloading 1KGP Phase 1 GT).
                         Columns: sample,A1,A2,B1,B2[,...] (comma-separated, header required).

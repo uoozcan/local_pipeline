@@ -218,9 +218,9 @@ if (params.input_bam) {
 // longreads_hifi: PacBio HiFi BAM  → T1K (long-read mode) + HiFi-HLA (4-field)
 // longreads_ont:  Oxford Nanopore  → T1K (long-read mode)
 def SEQ_TYPE_TOOLS = [
-    'WGS'            : ['spechla', 'hlahd', 'hlala', 'arcashla', 'optitype', 'hlascan', 't1k', 'polysolver', 'kourami'],
-    'WES'            : ['spechla', 'hlahd', 'optitype', 'hlascan', 't1k', 'polysolver', 'kourami'],
-    'RNAseq'         : ['arcashla', 'optitype', 't1k', 'seq2hla'],
+    'WGS'            : ['spechla', 'hlahd', 'arcashla', 'optitype', 'polysolver', 'kourami', 't1k'],
+    'WES'            : ['spechla', 'hlahd', 'optitype', 'polysolver', 'kourami', 't1k', 'arcashla'],
+    'RNAseq'         : ['arcashla', 'optitype', 'seq2hla', 't1k', 'spechla', 'hlahd'],
     'targeted'       : ['optitype', 'hlahd'],
     'longreads_hifi' : ['t1k', 'hifihla'],
     'longreads_ont'  : ['t1k'],

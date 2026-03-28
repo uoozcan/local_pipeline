@@ -57,7 +57,7 @@ From: python:3.10-slim
 
     # Clean up
     apt-get clean
-    rm -rf /tmp/* /root/.cache
+    rm -rf /tmp/samtools-1.19* /root/.cache
 
 %environment
     export PATH=/usr/local/bin:$PATH
